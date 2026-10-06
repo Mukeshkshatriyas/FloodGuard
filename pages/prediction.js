@@ -434,3 +434,12 @@ export default function FloodPrediction() {
     </Layout>
   );
 }
+
+export async function getServerSideProps() {
+  return {
+    redirect: {
+      destination: '/flood',
+      permanent: false,
+    },
+  };
+}

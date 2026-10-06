@@ -62,6 +62,14 @@ const summaryCards = [
   }
 ];
 
+const disasterSections = [
+  { name: '🌊 Flood', value: '65%', status: 'Moderate to High Risk' },
+  { name: '🌍 Earthquake', value: 'No data', status: 'Assessment unavailable' },
+  { name: '⛰️ Landslide', value: 'No data', status: 'Assessment unavailable' },
+  { name: '🌀 Cyclone', value: 'No data', status: 'Assessment unavailable' },
+  { name: '☀️ Drought', value: 'No data', status: 'Assessment unavailable' }
+];
+
 const recentAlerts = [
   {
     id: 1,
@@ -139,6 +147,17 @@ export default function Dashboard() {
               </div>
             );
           })}
+        </div>
+
+        {/* Disaster Sections */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6">
+          {disasterSections.map((disaster) => (
+            <section key={disaster.name} className="card card-hover p-5">
+              <h2 className="text-lg font-semibold text-white">{disaster.name}</h2>
+              <p className="text-2xl font-bold text-cyan-400 mt-4">{disaster.value}</p>
+              <p className="text-sm text-slate-400 mt-1">{disaster.status}</p>
+            </section>
+          ))}
         </div>
 
         {/* Main Content Grid */}
@@ -280,5 +299,14 @@ export default function Dashboard() {
       </div>
     </Layout>
   );
+}
+
+export async function getServerSideProps() {
+  return {
+    redirect: {
+      destination: '/flood',
+      permanent: false,
+    },
+  };
 }
 

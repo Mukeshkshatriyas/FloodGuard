@@ -12,16 +12,22 @@ import {
   Home,
   Activity,
   Shield,
-  Navigation
+  Navigation,
+  Mountain,
+  Wind,
+  Sun
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: Home },
+  { name: 'Flood Prediction', href: '/flood', icon: Waves },
+  { name: 'Earthquake Prediction', href: '/earthquake', icon: Activity },
+  { name: 'Landslide Prediction', href: '/landslide', icon: Mountain },
+  { name: 'Cyclone Prediction', href: '/cyclone', icon: Wind },
+  { name: 'Drought Prediction', href: '/drought', icon: Sun },
   { name: 'Rainfall Monitoring', href: '/rainfall', icon: CloudRain },
   { name: 'River Monitoring', href: '/rivers', icon: Waves },
-  { name: 'Flood Prediction', href: '/prediction', icon: Activity },
   { name: 'Alerts', href: '/alerts', icon: AlertTriangle },
 ];
 
@@ -29,6 +35,7 @@ export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
   const router = useRouter();
+  const currentSection = navigation.find((item) => item.href === router.pathname);
 
   useEffect(() => {
     const updateDateTime = () => {
@@ -82,8 +89,8 @@ export default function Layout({ children }) {
               <div className="flex items-center gap-3">
                 <Shield className="h-8 w-8 text-cyan-400" />
                 <div>
-                  <h1 className="text-lg font-semibold text-white">Karnataka Flood Prediction</h1>
-                  <p className="text-xs text-slate-400">Early Warning System</p>
+                  <h1 className="text-lg font-semibold text-white">SafeSphere</h1>
+                  <p className="text-xs text-slate-400">{currentSection?.name || 'Early Warning System'}</p>
                 </div>
               </div>
             </div>
@@ -122,7 +129,7 @@ function SidebarContent({ onClose, currentPath }) {
         <div className="flex items-center gap-3">
           <Shield className="h-8 w-8 text-cyan-400" />
           <div>
-            <h2 className="text-lg font-semibold text-white">FloodWatch</h2>
+            <h2 className="text-lg font-semibold text-white">SafeSphere</h2>
             <p className="text-xs text-slate-400">Karnataka</p>
           </div>
         </div>
