@@ -8,7 +8,7 @@ import { CloudRain, Droplets, Wind, Thermometer } from 'lucide-react';
 // Dynamically import map components to avoid SSR issues
 const RainfallHeatmapMap = dynamic(() => import('../maps/RainfallHeatmapMap'), {
   ssr: false,
-  loading: () => <div className="h-96 bg-slate-800 rounded-lg flex items-center justify-center text-slate-400">Loading Map…</div>
+  loading: () => <div className="skeleton" style={{ height: 384, borderRadius: 8 }} />,
 });
 
 // ─── Static fallback district data ────────────────────────────────────────────
@@ -136,55 +136,50 @@ export default function RainfallMonitoring() {
   const avgIntensity = totalRainfall24h / 24;
   const overallIntensity = avgIntensity >= 7.5 ? 'Heavy' : avgIntensity >= 2.5 ? 'Moderate' : 'Light';
 
-  const intensityColor = { Heavy: 'text-red-400', Moderate: 'text-amber-400', Light: 'text-cyan-400' };
-
   return (
     <Layout>
       <div className="space-y-6">
 
         {/* ── Header ────────────────────────────────────────────────────────── */}
-        <div className="card p-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-white">Rainfall Monitoring</h1>
-              <p className="text-slate-400 text-sm mt-1">
-                Real-time rainfall intensity across Karnataka districts
-                {usingFallback && (
-                  <span className="ml-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-400 text-xs">
-                    Estimated data — configure <code className="font-mono">NEXT_PUBLIC_OPENWEATHER_API_KEY</code> for live readings
-                  </span>
-                )}
-              </p>
-            </div>
-            <select
-              value={selectedDistrict}
-              onChange={e => setSelectedDistrict(e.target.value)}
-              className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm"
-            >
-              {(districtWeather.length > 0 ? districtWeather : FALLBACK_DISTRICT_DATA).map(d => (
-                <option key={d.district} value={d.district}>{d.district}</option>
-              ))}
-            </select>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 style={{ fontSize: 20, fontWeight: 500, color: '#ececee', margin: 0 }}>Rainfall monitoring</h1>
+            <p style={{ fontSize: 12, color: '#a1a1a6', marginTop: 4 }}>
+              Real-time rainfall intensity across Karnataka districts
+              {usingFallback && (
+                <span className="ml-2 badge badge-warn">
+                  Estimated — set NEXT_PUBLIC_OPENWEATHER_API_KEY for live data
+                </span>
+              )}
+            </p>
           </div>
+          <select
+            value={selectedDistrict}
+            onChange={e => setSelectedDistrict(e.target.value)}
+            className="ops-input"
+            style={{ maxWidth: 200 }}
+          >
+            {(districtWeather.length > 0 ? districtWeather : FALLBACK_DISTRICT_DATA).map(d => (
+              <option key={d.district} value={d.district}>{d.district}</option>
+            ))}
+          </select>
         </div>
 
         {/* ── District summary stats ────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { icon: CloudRain,    label: 'Current Rainfall', value: `${selected.rainfall ?? 0} mm/h`,          color: 'text-cyan-400' },
-            { icon: Droplets,     label: '24 h Total',       value: `${totalRainfall24h} mm`,                  color: 'text-blue-400' },
-            { icon: Thermometer,  label: 'Temperature',      value: `${selected.temperature ?? '–'} °C`,       color: 'text-amber-400' },
-            { icon: Wind,         label: 'Wind Speed',       value: `${selected.windSpeed ?? '–'} km/h`,       color: 'text-emerald-400' },
+            { icon: CloudRain,   label: 'Current Rainfall', value: `${selected.rainfall ?? 0} mm/h` },
+            { icon: Droplets,    label: '24 h Total',       value: `${totalRainfall24h} mm` },
+            { icon: Thermometer, label: 'Temperature',      value: `${selected.temperature ?? '–'} °C` },
+            { icon: Wind,        label: 'Wind Speed',       value: `${selected.windSpeed ?? '–'} km/h` },
           ].map(stat => {
             const Icon = stat.icon;
             return (
-              <div key={stat.label} className="card p-4 flex items-center gap-4">
-                <div className="p-2 rounded-lg bg-slate-800">
-                  <Icon className={`h-5 w-5 ${stat.color}`} />
-                </div>
+              <div key={stat.label} className="card p-4 flex items-center gap-3">
+                <Icon className="h-4 w-4 flex-shrink-0" style={{ color: '#a1a1a6' }} strokeWidth={1.5} />
                 <div>
-                  <p className="text-xs text-slate-400">{stat.label}</p>
-                  <p className={`text-lg font-bold ${stat.color}`}>{stat.value}</p>
+                  <p style={{ fontSize: 11, color: '#a1a1a6', margin: 0 }}>{stat.label}</p>
+                  <p className="num" style={{ fontSize: 18, fontWeight: 500, color: '#ececee', marginTop: 2, lineHeight: 1 }}>{stat.value}</p>
                 </div>
               </div>
             );
@@ -195,16 +190,18 @@ export default function RainfallMonitoring() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-xl font-bold text-white">24-Hour Rainfall Trend — {selectedDistrict}</h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Overall intensity: <span className={`font-semibold ${intensityColor[overallIntensity] ?? 'text-slate-300'}`}>{overallIntensity}</span>
+              <p style={{ fontSize: 13, fontWeight: 500, color: '#ececee', margin: 0 }}>
+                24-hour rainfall trend — {selectedDistrict}
+              </p>
+              <p style={{ fontSize: 11, color: '#a1a1a6', marginTop: 3 }}>
+                Intensity: <span style={{ color: avgIntensity >= 7.5 ? '#e5484d' : avgIntensity >= 2.5 ? '#f59e0b' : '#a1a1a6' }}>{overallIntensity}</span>
                 &nbsp;·&nbsp;Peak: {peakHour.rainfall} mm at {peakHour.time}
               </p>
             </div>
           </div>
           {rainfallData.length === 0 ? (
             <div className="h-80 flex items-center justify-center">
-              <div className="animate-pulse h-4 w-48 rounded bg-slate-700" />
+              <div className="skeleton" style={{ height: 16, width: 192, borderRadius: 4 }} />
             </div>
           ) : (
             <div className="h-80">
@@ -212,37 +209,40 @@ export default function RainfallMonitoring() {
                 <AreaChart data={rainfallData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                   <defs>
                     <linearGradient id="rainfallGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#22d3ee" stopOpacity={0.7} />
-                      <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.05} />
+                      <stop offset="0%"   stopColor="#2dd4bf" stopOpacity={0.12} />
+                      <stop offset="100%" stopColor="#2dd4bf" stopOpacity={0.01} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2d" />
                   <XAxis
                     dataKey="time"
-                    stroke="#475569"
+                    stroke="transparent"
                     fontSize={11}
                     interval="preserveStartEnd"
-                    tick={{ fill: '#94a3b8' }}
+                    tick={{ fill: '#a1a1a6' }}
+                    tickLine={false}
                   />
                   <YAxis
-                    stroke="#475569"
+                    stroke="transparent"
                     fontSize={11}
-                    tick={{ fill: '#94a3b8' }}
-                    label={{ value: 'mm / h', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#64748b', fontSize: 11 } }}
+                    tick={{ fill: '#a1a1a6' }}
+                    tickLine={false}
+                    axisLine={false}
+                    label={{ value: 'mm / h', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#a1a1a6', fontSize: 11 } }}
                   />
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#f1f5f9' }}
-                    labelStyle={{ color: '#94a3b8' }}
+                    contentStyle={{ backgroundColor: '#0f0f10', border: '1px solid #2a2a2d', borderRadius: '8px', color: '#ececee', fontSize: 12 }}
+                    labelStyle={{ color: '#a1a1a6' }}
                     formatter={v => [`${v} mm`, 'Rainfall']}
                   />
                   <Area
                     type="monotone"
                     dataKey="rainfall"
-                    stroke="#22d3ee"
-                    strokeWidth={2}
+                    stroke="#2dd4bf"
+                    strokeWidth={1.5}
                     fill="url(#rainfallGradient)"
                     dot={false}
-                    activeDot={{ r: 4, stroke: '#22d3ee', strokeWidth: 2, fill: '#0f172a' }}
+                    activeDot={{ r: 3, stroke: '#2dd4bf', strokeWidth: 0, fill: '#2dd4bf' }}
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -252,7 +252,9 @@ export default function RainfallMonitoring() {
 
         {/* ── Intensity bar chart for top districts ─────────────────────────── */}
         <div className="card p-6">
-          <h2 className="text-xl font-bold text-white mb-4">Current Hourly Rainfall by District</h2>
+          <p style={{ fontSize: 13, fontWeight: 500, color: '#ececee', marginBottom: 12 }}>
+            Hourly rainfall by district
+          </p>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -262,24 +264,27 @@ export default function RainfallMonitoring() {
                   .map(d => ({ name: d.district.replace(' ', '\n'), rainfall: d.rainfall || 0 }))}
                 margin={{ top: 5, right: 20, left: 0, bottom: 60 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2d" />
                 <XAxis
                   dataKey="name"
-                  stroke="#475569"
+                  stroke="transparent"
                   fontSize={10}
-                  tick={{ fill: '#94a3b8', fontSize: 10 }}
+                  tick={{ fill: '#a1a1a6', fontSize: 10 }}
                   interval={0}
                   angle={-40}
                   textAnchor="end"
+                  tickLine={false}
                 />
                 <YAxis
-                  stroke="#475569"
+                  stroke="transparent"
                   fontSize={11}
-                  tick={{ fill: '#94a3b8' }}
-                  label={{ value: 'mm / h', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#64748b', fontSize: 11 } }}
+                  tick={{ fill: '#a1a1a6' }}
+                  tickLine={false}
+                  axisLine={false}
+                  label={{ value: 'mm / h', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#a1a1a6', fontSize: 11 } }}
                 />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#f1f5f9' }}
+                  contentStyle={{ backgroundColor: '#0f0f10', border: '1px solid #2a2a2d', borderRadius: '8px', color: '#ececee', fontSize: 12 }}
                   formatter={v => [`${v} mm`, 'Rainfall']}
                 />
                 <Bar dataKey="rainfall" radius={[3, 3, 0, 0]}>
@@ -295,10 +300,10 @@ export default function RainfallMonitoring() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-3 flex gap-4 text-xs text-slate-400">
-            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-cyan-400 inline-block"/>&lt; 2.5 mm — Light</span>
-            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-yellow-400 inline-block"/>2.5–7.5 mm — Moderate</span>
-            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-orange-400 inline-block"/>&gt; 7.5 mm — Heavy</span>
+          <div className="mt-3 flex gap-4 text-xs" style={{ color: '#a1a1a6' }}>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded" style={{ backgroundColor: '#2dd4bf', display: 'inline-block'}}/>&lt; 2.5 mm — Light</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded" style={{ backgroundColor: '#f59e0b', display: 'inline-block'}}/>2.5–7.5 mm — Moderate</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded" style={{ backgroundColor: '#f97316', display: 'inline-block'}}/>7.5 mm+ — Heavy</span>
           </div>
         </div>
 
@@ -306,45 +311,56 @@ export default function RainfallMonitoring() {
         <div className="card p-6">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between mb-4">
             <div>
-              <h2 className="text-xl font-bold text-white">Rainfall Intensity Map</h2>
-              <p className="text-sm text-slate-400">Hourly rainfall per district (bubble size = intensity)</p>
+              <p style={{ fontSize: 13, fontWeight: 500, color: '#ececee', margin: 0 }}>Rainfall intensity map</p>
+              <p style={{ fontSize: 11, color: '#a1a1a6', marginTop: 2 }}>Hourly rainfall per district (bubble size = intensity)</p>
             </div>
-            <p className="text-xs text-slate-500">{districtWeather.length} districts reporting</p>
+            <p style={{ fontSize: 11, color: '#a1a1a6' }}>{districtWeather.length} districts reporting</p>
           </div>
           <RainfallHeatmapMap locations={districtWeather} />
         </div>
 
         {/* ── District table ────────────────────────────────────────────────── */}
-        <div className="card p-6">
-          <h2 className="text-xl font-bold text-white mb-4">District Summary</h2>
+        <div className="card" style={{ overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #2a2a2d' }}>
+            <p style={{ fontSize: 13, fontWeight: 500, color: '#ececee', margin: 0 }}>District summary</p>
+          </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="ops-table">
               <thead>
-                <tr className="border-b border-slate-800">
-                  {['District', 'Rainfall (mm/h)', 'Intensity', 'Humidity (%)', 'Temp (°C)', 'Wind (km/h)'].map(col => (
-                    <th key={col} className="text-left py-3 px-4 text-xs font-medium text-slate-400">{col}</th>
-                  ))}
+                <tr>
+                  <th>District</th>
+                  <th className="num">mm/h</th>
+                  <th>Intensity</th>
+                  <th className="num">Humidity %</th>
+                  <th className="num">Temp °C</th>
+                  <th className="num">Wind km/h</th>
                 </tr>
               </thead>
               <tbody>
                 {[...districtWeather]
                   .sort((a, b) => (b.rainfall || 0) - (a.rainfall || 0))
-                  .map((d, i) => {
+                  .map((d) => {
                     const r = d.rainfall || 0;
                     const intensity = r >= 7.5 ? 'Heavy' : r >= 2.5 ? 'Moderate' : 'Light';
-                    const intensityClass = intensity === 'Heavy' ? 'text-red-400 bg-red-500/10 border-red-500/30'
-                      : intensity === 'Moderate' ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
-                      : 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30';
+                    const sevStyle = intensity === 'Heavy'
+                      ? { color: '#e5484d', bg: 'rgba(229,72,77,0.10)',  border: 'rgba(229,72,77,0.20)' }
+                      : intensity === 'Moderate'
+                      ? { color: '#f59e0b', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.20)' }
+                      : { color: '#a1a1a6', bg: 'rgba(237,237,237,0.06)',border: 'rgba(237,237,237,0.10)' };
                     return (
-                      <tr key={d.district} className={`border-b border-slate-800/60 transition-colors hover:bg-slate-800/30 ${d.district === selectedDistrict ? 'bg-cyan-500/5' : ''}`}>
-                        <td className="py-3 px-4 font-medium text-white">{d.district}</td>
-                        <td className="py-3 px-4 text-slate-200 font-mono">{r.toFixed(1)}</td>
-                        <td className="py-3 px-4">
-                          <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${intensityClass}`}>{intensity}</span>
+                      <tr key={d.district} style={d.district === selectedDistrict ? { backgroundColor: '#232325' } : {}}>
+                        <td className="primary">{d.district}</td>
+                        <td className="num">{r.toFixed(1)}</td>
+                        <td>
+                          <span style={{
+                            display: 'inline-flex', padding: '1px 6px', fontSize: 11,
+                            borderRadius: 4, fontFamily: 'Geist Mono, monospace', fontWeight: 500,
+                            backgroundColor: sevStyle.bg, color: sevStyle.color, border: `1px solid ${sevStyle.border}`,
+                          }}>{intensity.toLowerCase()}</span>
                         </td>
-                        <td className="py-3 px-4 text-slate-300">{d.humidity ?? '–'}</td>
-                        <td className="py-3 px-4 text-slate-300">{d.temperature ?? '–'}</td>
-                        <td className="py-3 px-4 text-slate-300">{d.windSpeed ?? '–'}</td>
+                        <td className="num">{d.humidity ?? '–'}</td>
+                        <td className="num">{d.temperature ?? '–'}</td>
+                        <td className="num">{d.windSpeed ?? '–'}</td>
                       </tr>
                     );
                   })}

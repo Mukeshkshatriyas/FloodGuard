@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, LoaderCircle, MessageCircle, Send, Sparkles } from 'lucide-react';
+import { Bot, LoaderCircle, MessageCircle, Send } from 'lucide-react';
 import Layout from '../components/Layout';
+
+// ── Token constants ───────────────────────────────────────────────────────────
+const C = {
+  card:     '#19191b',
+  raised:   '#232325',
+  line:     '#2a2a2d',
+  primary:  '#ececee',
+  secondary:'#a1a1a6',
+  muted:    '#85858b',
+  teal:     '#2dd4bf',
+};
 
 const starterQuestions = [
   'What does this project do?',
@@ -12,134 +23,203 @@ export default function ProjectAssistant() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: 'I’m the SafeSphere project assistant. Ask me what the project does, how its prediction pages work, or what its weather, map, and alert features are for.',
+      content: "I'm the SafeSphere project assistant. Ask me what the project does, how its prediction pages work, or what its weather, map, and alert features are for.",
     },
   ]);
-  const [question, setQuestion] = useState('');
+  const [question,  setQuestion]  = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [error, setError] = useState('');
-  const endOfMessagesRef = useRef(null);
+  const [error,     setError]     = useState('');
+  const endRef = useRef(null);
 
   useEffect(() => {
-    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, isSending]);
 
+  // ── API call — logic unchanged ────────────────────────────────────────────
   async function sendQuestion(value) {
     const text = value.trim();
     if (!text || isSending) return;
-
-    setMessages((current) => [...current, { role: 'user', content: text }]);
+    setMessages(cur => [...cur, { role: 'user', content: text }]);
     setQuestion('');
     setError('');
     setIsSending(true);
-
     try {
-      const response = await fetch('/api/project-chat', {
+      const res = await fetch('/api/project-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: text }),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || 'The assistant could not answer right now.');
-      setMessages((current) => [...current, { role: 'assistant', content: payload.answer }]);
-    } catch (requestError) {
-      setError(requestError.message || 'Could not connect to the assistant.');
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || 'The assistant could not answer right now.');
+      setMessages(cur => [...cur, { role: 'assistant', content: payload.answer }]);
+    } catch (err) {
+      setError(err.message || 'Could not connect to the assistant.');
     } finally {
       setIsSending(false);
     }
   }
 
-  function handleSubmit(event) {
-    event.preventDefault();
-    sendQuestion(question);
-  }
+  function handleSubmit(e) { e.preventDefault(); sendQuestion(question); }
 
   return (
     <Layout>
-      <div className="mx-auto flex min-h-[calc(100vh-10rem)] max-w-5xl flex-col">
-        <header className="mb-6 border-b border-slate-800 pb-5">
-          <p className="flex items-center gap-2 text-sm font-medium text-cyan-300">
-            <Sparkles className="h-4 w-4" /> SafeSphere help
-          </p>
-          <h1 className="mt-2 text-3xl font-bold text-white">Project Assistant</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-            Ask about the dashboard, disaster predictions, or how the project’s integrations fit together.
-          </p>
-        </header>
+      <div style={{ maxWidth: 800, margin: '0 auto', display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 10rem)' }}>
 
-        <section className="flex min-h-[420px] flex-1 flex-col" aria-label="Conversation">
-          <div className="flex-1 space-y-5 overflow-y-auto py-2" aria-live="polite">
-            {messages.map((message, index) => (
-              <article key={`${message.role}-${index}`} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}>
-                {message.role === 'assistant' && (
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
-                    <Bot className="h-5 w-5" />
+        {/* ── Page title — no card wrapper, no cyan eyebrow ────────────── */}
+        <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: `1px solid ${C.line}` }}>
+          <h1 style={{ fontSize: 20, fontWeight: 500, color: C.primary, margin: 0 }}>Assistant</h1>
+          <p style={{ fontSize: 12, color: C.secondary, marginTop: 4 }}>
+            Ask about the dashboard, predictions, or how the project fits together.
+          </p>
+        </div>
+
+        {/* ── Conversation ─────────────────────────────────────────────── */}
+        <section
+          style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+          aria-label="Conversation"
+        >
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 8 }} aria-live="polite">
+            {messages.map((msg, i) => (
+              <article
+                key={`${msg.role}-${i}`}
+                style={{
+                  display: 'flex',
+                  gap: 10,
+                  justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                }}
+              >
+                {/* Bot avatar — neutral bg-g-raised square, no teal border */}
+                {msg.role === 'assistant' && (
+                  <span style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 32, height: 32, flexShrink: 0,
+                    backgroundColor: C.raised, border: `1px solid ${C.line}`,
+                    borderRadius: 8,
+                  }}>
+                    <Bot style={{ width: 16, height: 16, color: C.secondary }} strokeWidth={1.5} />
                   </span>
                 )}
-                <div className={`max-w-[min(42rem,85%)] whitespace-pre-wrap rounded-lg border px-4 py-3 text-sm leading-6 ${
-                  message.role === 'user'
-                    ? 'border-cyan-500/30 bg-cyan-950/50 text-cyan-50'
-                    : 'border-slate-800 bg-slate-900 text-slate-200'
-                }`}>
-                  {message.content}
+
+                {/* Message bubble */}
+                <div style={{
+                  maxWidth: 'min(42rem, 85%)',
+                  whiteSpace: 'pre-wrap',
+                  borderRadius: 10,
+                  padding: '10px 14px',
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                  // user = bg-g-raised; assistant = bg-g-card — both with hairline, no blue/cyan
+                  backgroundColor: msg.role === 'user' ? C.raised : C.card,
+                  border:          `1px solid ${C.line}`,
+                  color:           C.primary,
+                }}>
+                  {msg.content}
                 </div>
               </article>
             ))}
+
+            {/* Thinking indicator */}
             {isSending && (
-              <div className="flex items-center gap-3 text-sm text-slate-400" role="status">
-                <LoaderCircle className="h-4 w-4 animate-spin text-cyan-300" /> Thinking…
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: C.secondary }} role="status">
+                <LoaderCircle style={{ width: 14, height: 14, color: C.teal }} className="animate-spin" strokeWidth={1.5} />
+                Thinking…
               </div>
             )}
-            <div ref={endOfMessagesRef} />
+
+            <div ref={endRef} />
           </div>
 
+          {/* ── Starter suggestion chips ────────────────────────────────── */}
           {messages.length === 1 && (
-            <div className="flex flex-wrap gap-2 py-4">
-              {starterQuestions.map((starter) => (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '12px 0' }}>
+              {starterQuestions.map(q => (
                 <button
-                  key={starter}
+                  key={q}
                   type="button"
-                  onClick={() => sendQuestion(starter)}
+                  onClick={() => sendQuestion(q)}
                   disabled={isSending}
-                  className="rounded-md border border-slate-700 px-3 py-2 text-left text-sm text-slate-300 transition hover:border-cyan-500/60 hover:text-white disabled:opacity-50"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '6px 12px', fontSize: 12,
+                    backgroundColor: C.card, border: `1px solid ${C.line}`,
+                    borderRadius: 8, color: C.secondary, cursor: 'pointer',
+                    transition: 'background-color 120ms',
+                    opacity: isSending ? 0.5 : 1,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = C.raised; e.currentTarget.style.color = C.primary; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = C.card;   e.currentTarget.style.color = C.secondary; }}
                 >
-                  <MessageCircle className="mr-2 inline h-4 w-4 text-cyan-300" />{starter}
+                  <MessageCircle style={{ width: 12, height: 12 }} strokeWidth={1.5} />
+                  {q}
                 </button>
               ))}
             </div>
           )}
 
-          {error && <p className="mb-3 text-sm text-red-300" role="alert">{error}</p>}
+          {/* ── Error ───────────────────────────────────────────────────── */}
+          {error && (
+            <p role="alert" style={{ fontSize: 12, color: '#e5484d', marginBottom: 8 }}>{error}</p>
+          )}
 
-          <form onSubmit={handleSubmit} className="mt-4 flex items-end gap-3 border-t border-slate-800 pt-4">
+          {/* ── Input bar ────────────────────────────────────────────────── */}
+          <form
+            onSubmit={handleSubmit}
+            style={{
+              display: 'flex', alignItems: 'flex-end', gap: 8,
+              marginTop: 12, paddingTop: 12,
+              borderTop: `1px solid ${C.line}`,
+            }}
+          >
             <label htmlFor="project-question" className="sr-only">Ask the project assistant</label>
             <textarea
               id="project-question"
               value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  handleSubmit(event);
-                }
-              }}
+              onChange={e => setQuestion(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
               rows={2}
               maxLength={2000}
               placeholder="Ask a question about the project…"
-              className="min-h-12 flex-1 resize-y rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+              style={{
+                flex: 1,
+                minHeight: 48, resize: 'vertical',
+                backgroundColor: C.raised,
+                border: `1px solid ${C.line}`,
+                borderRadius: 8,
+                padding: '10px 12px',
+                fontSize: 13,
+                color: C.primary,
+                outline: 'none',
+                fontFamily: 'inherit',
+                // Teal focus ring only — no cyan border
+                transition: 'border-color 120ms',
+              }}
+              onFocus={e => { e.currentTarget.style.borderColor = C.teal; }}
+              onBlur={e =>  { e.currentTarget.style.borderColor = C.line;  }}
             />
+
+            {/* Send button — solid teal (single accent usage) */}
             <button
               type="submit"
               disabled={!question.trim() || isSending}
-              title="Send question"
               aria-label="Send question"
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-cyan-600 text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 40, height: 40, flexShrink: 0,
+                backgroundColor: C.teal,
+                border: 'none', borderRadius: 8, cursor: 'pointer',
+                opacity: (!question.trim() || isSending) ? 0.4 : 1,
+                transition: 'opacity 120ms',
+              }}
             >
-              <Send className="h-5 w-5" />
+              <Send style={{ width: 16, height: 16, color: '#0f0f10' }} strokeWidth={1.5} />
             </button>
           </form>
-          <p className="mt-2 text-xs text-slate-500">For emergencies, follow official local alerts and instructions.</p>
+
+          <p style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+            For emergencies, follow official local alerts and instructions.
+          </p>
         </section>
+
       </div>
     </Layout>
   );

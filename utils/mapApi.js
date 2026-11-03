@@ -189,6 +189,8 @@ export const fetchCurrentWeather = async (district) => {
 
     return {
       district,
+      lat: coords.lat,
+      lon: coords.lon,
       temperature: data.main.temp,
       humidity: data.main.humidity,
       pressure: data.main.pressure,

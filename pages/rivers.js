@@ -1,235 +1,250 @@
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import Layout from '../components/Layout';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Waves, TrendingUp, AlertTriangle } from 'lucide-react';
 
-// Dynamically import map components to avoid SSR issues
 const RiverStationsMap = dynamic(() => import('../maps/RiverStationsMap'), {
   ssr: false,
-  loading: () => <div className="h-96 bg-slate-800 rounded-lg flex items-center justify-center">Loading Map...</div>
+  loading: () => <div className="skeleton" style={{ height: 384, borderRadius: 8 }} />,
+});
+
+// ── Token constants ───────────────────────────────────────────────────────────
+const C = {
+  card:     '#19191b',
+  raised:   '#232325',
+  line:     '#2a2a2d',
+  primary:  '#ececee',
+  secondary:'#a1a1a6',
+  teal:     '#2dd4bf',
+};
+
+// Status colour — only the value itself uses colour, not a surrounding tile
+const statusColor = (s) =>
+  s === 'Critical' ? '#e5484d' : s === 'Warning' ? '#f59e0b' : '#4cc38a';
+
+const statusBadgeStyle = (s) => ({
+  display: 'inline-flex', alignItems: 'center',
+  padding: '1px 6px', fontSize: 11, fontWeight: 500,
+  borderRadius: 4, fontFamily: 'Geist Mono, monospace',
+  ...(s === 'Critical'
+    ? { backgroundColor: 'rgba(229,72,77,0.10)',  color: '#e5484d', border: '1px solid rgba(229,72,77,0.20)' }
+    : s === 'Warning'
+    ? { backgroundColor: 'rgba(245,158,11,0.10)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.20)' }
+    : { backgroundColor: 'rgba(76,195,138,0.10)', color: '#4cc38a', border: '1px solid rgba(76,195,138,0.20)' }),
 });
 
 export default function RiverMonitoring() {
-  const [riverData, setRiverData] = useState([]);
-  const [currentLevel, setCurrentLevel] = useState(0);
-  const [maxLevel, setMaxLevel] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [riverData,     setRiverData]     = useState([]);
+  const [currentLevel,  setCurrentLevel]  = useState(0);
+  const [maxLevel,      setMaxLevel]      = useState(0);
+  const [loading,       setLoading]       = useState(true);
 
-  // Generate sample 24-hour river level trend data
+  // Data generation — logic unchanged
   useEffect(() => {
-    const generateRiverData = () => {
+    const generate = () => {
       const data = [];
       const now = new Date();
-
       for (let i = 23; i >= 0; i--) {
-        const time = new Date(now.getTime() - i * 60 * 60 * 1000);
-        const hour = time.getHours();
-        // Simulate river level fluctuations with seasonal patterns
-        const baseLevel = 2.5;
-        const seasonalVariation = Math.sin((hour - 6) * Math.PI / 12) * 0.8;
-        const randomVariation = (Math.random() - 0.5) * 0.3;
-        const level = Math.max(0, baseLevel + seasonalVariation + randomVariation);
-
+        const t = new Date(now.getTime() - i * 3600_000);
+        const h = t.getHours();
+        const level = Math.max(0,
+          2.5 + Math.sin((h - 6) * Math.PI / 12) * 0.8 + (Math.random() - 0.5) * 0.3
+        );
         data.push({
-          time: time.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-          level: Math.round(level * 100) / 100,
-          status: level > 4 ? 'Critical' : level > 3 ? 'Warning' : 'Normal'
+          time:   t.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          level:  Math.round(level * 100) / 100,
+          status: level > 4 ? 'Critical' : level > 3 ? 'Warning' : 'Normal',
         });
       }
-
       setRiverData(data);
       setCurrentLevel(data[data.length - 1].level);
       setMaxLevel(Math.max(...data.map(d => d.level)));
       setLoading(false);
     };
-
-    generateRiverData();
-    const interval = setInterval(generateRiverData, 30000); // Update every 30 seconds
-    return () => clearInterval(interval);
+    generate();
+    const id = setInterval(generate, 30_000);
+    return () => clearInterval(id);
   }, []);
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'Critical': return '#dc2626';
-      case 'Warning': return '#ea580c';
-      case 'Normal': return '#16a34a';
-      default: return '#6b7280';
-    }
-  };
-
-  const getRiskLevel = (level) => {
-    if (level > 4) return { level: 'Critical', color: '#dc2626' };
-    if (level > 3) return { level: 'Warning', color: '#ea580c' };
-    return { level: 'Normal', color: '#16a34a' };
-  };
-
-  const currentRisk = getRiskLevel(currentLevel);
+  const currentStatus = currentLevel > 4 ? 'Critical' : currentLevel > 3 ? 'Warning' : 'Normal';
 
   return (
     <Layout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="bg-slate-800 rounded-lg p-6">
-          <h1 className="text-2xl font-bold text-white mb-2">River Monitoring</h1>
-          <p className="text-slate-300">Real-time river water levels and monitoring stations across Karnataka</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        {/* ── Page title — plain, no card wrapper ─────────────────────── */}
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 500, color: C.primary, margin: 0 }}>River monitoring</h1>
+          <p style={{ fontSize: 12, color: C.secondary, marginTop: 4 }}>
+            Real-time water levels and station data across Karnataka
+          </p>
         </div>
 
-        {/* Key Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-slate-800 rounded-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-slate-400 text-sm">Current River Level</p>
-                <p className="text-2xl font-bold text-white">{currentLevel} m</p>
-              </div>
-              <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
-                <span className="text-white font-bold">{currentLevel > 4 ? 'C' : currentLevel > 3 ? 'W' : 'N'}</span>
-              </div>
+        {/* ── Key metrics — 3 stat tiles ──────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+
+          {/* Current level */}
+          <div style={{ backgroundColor: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <p style={{ fontSize: 11, color: C.secondary, margin: 0 }}>Current level</p>
+              <Waves style={{ width: 16, height: 16, color: C.secondary }} strokeWidth={1.5} />
             </div>
+            <p className="num" style={{ fontSize: 28, fontWeight: 500, color: statusColor(currentStatus), margin: '6px 0 0', lineHeight: 1 }}>
+              {loading ? '–' : `${currentLevel} m`}
+            </p>
+            <p style={{ fontSize: 11, color: C.secondary, marginTop: 4 }}>
+              Status: <span style={{ color: statusColor(currentStatus), fontWeight: 500 }}>{currentStatus}</span>
+            </p>
           </div>
 
-          <div className="bg-slate-800 rounded-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-slate-400 text-sm">24h Max Level</p>
-                <p className="text-2xl font-bold text-white">{maxLevel} m</p>
-              </div>
-              <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center">
-                <span className="text-white font-bold">MAX</span>
-              </div>
+          {/* 24h max */}
+          <div style={{ backgroundColor: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <p style={{ fontSize: 11, color: C.secondary, margin: 0 }}>24 h max</p>
+              <TrendingUp style={{ width: 16, height: 16, color: C.secondary }} strokeWidth={1.5} />
             </div>
+            <p className="num" style={{ fontSize: 28, fontWeight: 500, color: C.primary, margin: '6px 0 0', lineHeight: 1 }}>
+              {loading ? '–' : `${maxLevel} m`}
+            </p>
+            <p style={{ fontSize: 11, color: C.secondary, marginTop: 4 }}>Peak in last 24 h</p>
           </div>
 
-          <div className="bg-slate-800 rounded-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-slate-400 text-sm">Status</p>
-                <p className="text-2xl font-bold" style={{ color: currentRisk.color }}>{currentRisk.level}</p>
-              </div>
-              <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ backgroundColor: currentRisk.color }}>
-                <span className="text-white font-bold">!</span>
-              </div>
+          {/* Stations reporting */}
+          <div style={{ backgroundColor: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <p style={{ fontSize: 11, color: C.secondary, margin: 0 }}>Stations</p>
+              <AlertTriangle style={{ width: 16, height: 16, color: C.secondary }} strokeWidth={1.5} />
             </div>
-          </div>
-        </div>
-
-        {/* 24-Hour Trend Chart */}
-        <div className="bg-slate-800 rounded-lg p-6">
-          <h2 className="text-xl font-bold text-white mb-4">24-Hour River Level Trend</h2>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={riverData}>
-                <defs>
-                  <linearGradient id="riverGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.1}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis
-                  dataKey="time"
-                  stroke="#9ca3af"
-                  fontSize={12}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  stroke="#9ca3af"
-                  fontSize={12}
-                  label={{ value: 'Water Level (m)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#9ca3af' } }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1f2937',
-                    border: '1px solid #374151',
-                    borderRadius: '8px',
-                    color: '#fff'
-                  }}
-                  labelStyle={{ color: '#9ca3af' }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="level"
-                  stroke="#22d3ee"
-                  fillOpacity={1}
-                  fill="url(#riverGradient)"
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <p className="num" style={{ fontSize: 28, fontWeight: 500, color: C.primary, margin: '6px 0 0', lineHeight: 1 }}>5</p>
+            <p style={{ fontSize: 11, color: C.secondary, marginTop: 4 }}>Reporting now</p>
           </div>
         </div>
 
-        {/* River Stations Map */}
-        <div className="bg-slate-800 rounded-lg p-6">
-          <h2 className="text-xl font-bold text-white mb-4">River Monitoring Stations</h2>
-          <div className="h-96">
+        {/* ── 24-hour trend chart ─────────────────────────────────────── */}
+        <div style={{ backgroundColor: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '16px 20px' }}>
+          <p style={{ fontSize: 13, fontWeight: 500, color: C.primary, margin: '0 0 12px' }}>
+            24-hour river level trend
+          </p>
+          {loading ? (
+            <div className="skeleton" style={{ height: 280, borderRadius: 6 }} />
+          ) : (
+            <div style={{ height: 280 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={riverData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                  <defs>
+                    {/* Very faint fill — instrument style, not decorative gradient */}
+                    <linearGradient id="rvGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"   stopColor={C.teal} stopOpacity={0.12} />
+                      <stop offset="100%" stopColor={C.teal} stopOpacity={0.01} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.line} vertical={false} />
+                  <XAxis
+                    dataKey="time"
+                    stroke="transparent"
+                    fontSize={11}
+                    interval="preserveStartEnd"
+                    tick={{ fill: C.secondary }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    stroke="transparent"
+                    fontSize={11}
+                    tick={{ fill: C.secondary }}
+                    tickLine={false}
+                    axisLine={false}
+                    label={{ value: 'm', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: C.secondary, fontSize: 11 } }}
+                  />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0f0f10', border: `1px solid ${C.line}`, borderRadius: 8, color: C.primary, fontSize: 12 }}
+                    labelStyle={{ color: C.secondary }}
+                    formatter={v => [`${v} m`, 'Level']}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="level"
+                    stroke={C.teal}
+                    strokeWidth={1.5}
+                    fill="url(#rvGrad)"
+                    dot={false}
+                    activeDot={{ r: 3, fill: C.teal, strokeWidth: 0 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+
+        {/* ── Map ─────────────────────────────────────────────────────── */}
+        <div style={{ backgroundColor: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '16px 20px' }}>
+          <p style={{ fontSize: 13, fontWeight: 500, color: C.primary, margin: '0 0 12px' }}>
+            Monitoring stations
+          </p>
+          <div style={{ height: 384, borderRadius: 8, overflow: 'hidden' }}>
             <RiverStationsMap />
           </div>
         </div>
 
-        {/* Status Legend */}
-        <div className="bg-slate-800 rounded-lg p-6">
-          <h3 className="text-lg font-bold text-white mb-4">Water Level Status Scale</h3>
-          <div className="flex flex-wrap gap-4">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-green-500"></div>
-              <span className="text-slate-300">Normal (&lt; 3m)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-orange-500"></div>
-              <span className="text-slate-300">Warning (3-4m)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-red-500"></div>
-              <span className="text-slate-300">Critical (&gt; 4m)</span>
-            </div>
+        {/* ── Status legend ────────────────────────────────────────────── */}
+        <div style={{ backgroundColor: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '14px 16px' }}>
+          <p style={{ fontSize: 11, fontWeight: 500, color: C.secondary, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+            Water level scale
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            {[
+              { label: 'Normal (< 3 m)',   color: '#4cc38a' },
+              { label: 'Warning (3–4 m)',  color: '#f59e0b' },
+              { label: 'Critical (> 4 m)', color: '#e5484d' },
+            ].map(s => (
+              <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: s.color, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: C.secondary }}>{s.label}</span>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* River Stations Table */}
-        <div className="bg-slate-800 rounded-lg p-6">
-          <h3 className="text-lg font-bold text-white mb-4">Monitoring Stations Status</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full">
+        {/* ── Stations table ───────────────────────────────────────────── */}
+        <div style={{ backgroundColor: C.card, border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.line}` }}>
+            <p style={{ fontSize: 13, fontWeight: 500, color: C.primary, margin: 0 }}>Station status</p>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="ops-table">
               <thead>
-                <tr className="border-b border-slate-700">
-                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Station</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">River</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Current Level</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Status</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Last Update</th>
+                <tr>
+                  <th>Station</th>
+                  <th>River</th>
+                  <th className="num">Level (m)</th>
+                  <th>Status</th>
+                  <th>Updated</th>
                 </tr>
               </thead>
               <tbody>
                 {[
-                  { station: 'Kaveri Bridge', river: 'Kaveri', level: 2.8, status: 'Normal' },
-                  { station: 'Tungabhadra Dam', river: 'Tungabhadra', level: 3.2, status: 'Warning' },
-                  { station: 'Krishna Barrage', river: 'Krishna', level: 4.1, status: 'Critical' },
-                  { station: 'Sharavati Falls', river: 'Sharavati', level: 2.5, status: 'Normal' },
-                  { station: 'Cauvery Sagar', river: 'Kaveri', level: 3.8, status: 'Warning' }
-                ].map((station, index) => (
-                  <tr key={index} className="border-b border-slate-800 hover:bg-slate-800/50 transition-colors">
-                    <td className="py-3 px-4 text-sm text-white font-medium">{station.station}</td>
-                    <td className="py-3 px-4 text-sm text-slate-300">{station.river}</td>
-                    <td className="py-3 px-4 text-sm text-slate-300">{station.level} m</td>
-                    <td className="py-3 px-4">
-                      <span className={`px-3 py-1 text-xs font-medium rounded-full ${
-                        station.status === 'Critical' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                        station.status === 'Warning' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
-                        'bg-green-500/20 text-green-400 border border-green-500/30'
-                      }`}>
-                        {station.status}
-                      </span>
+                  { station: 'Kaveri Bridge',   river: 'Kaveri',       level: 2.83, status: 'Normal' },
+                  { station: 'Tungabhadra Dam', river: 'Tungabhadra',  level: 3.21, status: 'Warning' },
+                  { station: 'Krishna Barrage', river: 'Krishna',      level: 4.08, status: 'Critical' },
+                  { station: 'Sharavati Falls', river: 'Sharavati',    level: 2.54, status: 'Normal' },
+                  { station: 'Cauvery Sagar',   river: 'Kaveri',       level: 3.76, status: 'Warning' },
+                ].map((s, i) => (
+                  <tr key={i}>
+                    <td className="primary">{s.station}</td>
+                    <td>{s.river}</td>
+                    <td className="num" style={{ color: statusColor(s.status) }}>{s.level.toFixed(2)}</td>
+                    <td>
+                      <span style={statusBadgeStyle(s.status)}>{s.status.toLowerCase()}</span>
                     </td>
-                    <td className="py-3 px-4 text-sm text-slate-400">2 min ago</td>
+                    <td style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>2 min ago</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </div>
+
       </div>
     </Layout>
   );
 }
-

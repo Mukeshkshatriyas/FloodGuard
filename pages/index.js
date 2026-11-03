@@ -1,408 +1,389 @@
+/**
+ * Dashboard overview — primary landing page
+ *
+ * Layout: 4-stat row + wide map / narrow risk-indicators side by side.
+ *         LiveTrends below, active alerts as dense table, system status row.
+ * No emoji tiles, no large icon-in-coloured-square, no gradients on bars.
+ * Type: 20px page title, 13px body, 12px meta. Numbers always tabular mono.
+ * States: skeleton loading, error, empty, stale-data/offline handled by Layout.
+ */
+
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { Activity, AlertTriangle, CloudRain, Waves, TrendingUp, TrendingDown, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CloudRain, Waves, Activity, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { fetchRiverLocations, fetchRainfallLocations } from '../utils/mapApi';
 
 const FloodRiskMap = dynamic(() => import('../maps/FloodRiskMap'), {
   ssr: false,
-  loading: () => <div className="h-72 bg-slate-800 rounded-xl animate-pulse" />,
+  loading: () => <div className="skeleton" style={{ height: 280, borderRadius: 8 }} />,
 });
 
 const LiveTrends = dynamic(() => import('../components/LiveTrends'), {
   ssr: false,
   loading: () => (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      {[0, 1].map(i => (
-        <div key={i} className="card p-6 animate-pulse">
-          <div className="h-5 w-48 bg-slate-700 rounded mb-6" />
-          <div className="h-64 bg-slate-700/60 rounded" />
-        </div>
-      ))}
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      {[0, 1].map(i => <div key={i} className="skeleton" style={{ height: 220, borderRadius: 12 }} />)}
     </div>
   ),
 });
 
-// Disaster types with their Flask API endpoint keys
-const DISASTER_TYPES = [
-  { key: 'flood',     label: 'Flood',     href: '/flood',     icon: '🌊', color: 'text-cyan-400' },
-  { key: 'earthquake',label: 'Earthquake',href: '/earthquake',icon: '🌍', color: 'text-orange-400' },
-  { key: 'landslide', label: 'Landslide', href: '/landslide', icon: '⛰️', color: 'text-amber-400' },
-  { key: 'cyclone',   label: 'Cyclone',   href: '/cyclone',   icon: '🌀', color: 'text-blue-400' },
-  { key: 'drought',   label: 'Drought',   href: '/drought',   icon: '☀️', color: 'text-yellow-400' },
+// ── Risk level helpers ────────────────────────────────────────────────────────
+const RISK_BAR_COLOR = pct => pct >= 70 ? '#e5484d' : pct >= 40 ? '#f59e0b' : '#4cc38a';
+const SEVERITY_BADGE = { critical: 'badge-risk', high: 'badge-risk', medium: 'badge-warn', low: 'badge-ok' };
+
+// ── Disaster quick-links (no emoji, just text + icon) ─────────────────────────
+const HAZARD_LINKS = [
+  { key: 'flood',      label: 'Flood',      href: '/flood',      icon: Waves },
+  { key: 'earthquake', label: 'Earthquake', href: '/earthquake', icon: Activity },
+  { key: 'landslide',  label: 'Landslide',  href: '/landslide',  icon: Activity },
+  { key: 'cyclone',    label: 'Cyclone',    href: '/cyclone',    icon: Waves },
+  { key: 'drought',    label: 'Drought',    href: '/drought',    icon: Activity },
 ];
 
-// Severity badge classes
-const SEVERITY_CLASS = {
-  high:     'bg-red-500/20 text-red-400 border border-red-500/30',
-  medium:   'bg-orange-500/20 text-orange-400 border border-orange-500/30',
-  low:      'bg-amber-500/20 text-amber-400 border border-amber-500/30',
-  critical: 'bg-red-700/30 text-red-300 border border-red-700/40',
-};
+// ── Thin risk bar ─────────────────────────────────────────────────────────────
+function RiskBar({ label, pct, subLabel }) {
+  const color = RISK_BAR_COLOR(pct);
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+        <span style={{ fontSize: 12, color: '#a1a1a6' }}>{label}</span>
+        <span className="num" style={{ fontSize: 12, color }}>{pct}%</span>
+      </div>
+      <div style={{ height: 2, backgroundColor: '#232325', borderRadius: 2 }}>
+        <div style={{ height: '100%', width: `${pct}%`, backgroundColor: color, borderRadius: 2, transition: 'width 600ms cubic-bezier(0.22,1,0.36,1)' }} />
+      </div>
+      {subLabel && <p style={{ fontSize: 11, color: '#85858b', marginTop: 4 }}>{subLabel}</p>}
+    </div>
+  );
+}
+
+// ── Skeleton stat card ────────────────────────────────────────────────────────
+function StatSkeleton() {
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <div className="skeleton" style={{ height: 12, width: 80, marginBottom: 8 }} />
+      <div className="skeleton" style={{ height: 28, width: 60, marginBottom: 6 }} />
+      <div className="skeleton" style={{ height: 10, width: 100 }} />
+    </div>
+  );
+}
 
 export default function Dashboard() {
-  const [riverStations,  setRiverStations]  = useState([]);
-  const [rainfallData,   setRainfallData]   = useState([]);
-  const [apiStatus,      setApiStatus]      = useState('checking'); // 'online' | 'offline' | 'checking'
-  const [lastUpdated,    setLastUpdated]    = useState(null);
-  const [loading,        setLoading]        = useState(true);
+  const [riverStations, setRiverStations] = useState([]);
+  const [rainfallData,  setRainfallData]  = useState([]);
+  const [apiStatus,     setApiStatus]     = useState('checking');
+  const [lastUpdated,   setLastUpdated]   = useState(null);
+  const [loading,       setLoading]       = useState(true);
+  const [loadError,     setLoadError]     = useState(false);
 
-  // ── Load live station data ────────────────────────────────────────────────
+  // ── Station data ─────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-
     async function load() {
+      setLoadError(false);
       try {
-        const [rivers, rainfall] = await Promise.all([
-          fetchRiverLocations(),
-          fetchRainfallLocations(),
-        ]);
+        const [rivers, rainfall] = await Promise.all([fetchRiverLocations(), fetchRainfallLocations()]);
         if (cancelled) return;
         setRiverStations(rivers);
         setRainfallData(rainfall);
         setLastUpdated(new Date());
-      } catch (e) {
-        console.error('Dashboard: failed to load station data', e);
+      } catch {
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
-
     load();
-    const interval = setInterval(load, 5 * 60_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const id = setInterval(load, 5 * 60_000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  // ── Check Flask API health ────────────────────────────────────────────────
+  // ── Flask health check ────────────────────────────────────────────────────
   useEffect(() => {
-    async function checkApi() {
-      try {
-        const res = await fetch('/api/disaster-prediction', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ disaster: 'flood', inputs: { city: 'Bengaluru' } }),
-        });
-        setApiStatus(res.status < 503 ? 'online' : 'offline');
-      } catch {
-        setApiStatus('offline');
-      }
-    }
-    checkApi();
+    fetch('/api/disaster-prediction', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disaster: 'flood', inputs: { city: 'Bengaluru' } }),
+    }).then(r => setApiStatus(r.status < 503 ? 'online' : 'offline'))
+      .catch(() => setApiStatus('offline'));
   }, []);
 
-  // ── Derived stats from live data ──────────────────────────────────────────
-  const avgRainfallHourly = rainfallData.length
-    ? (rainfallData.reduce((s, d) => s + (d.rainfall_3h || 0), 0) / rainfallData.length).toFixed(1)
-    : '–';
-
-  const highestRiverStation = riverStations.length
-    ? riverStations.reduce((max, s) => (s.level || 0) > (max.level || 0) ? s : max, riverStations[0])
-    : null;
-
-  const highestRiverLevel = highestRiverStation
-    ? `${highestRiverStation.level.toFixed(1)} m`
-    : '–';
-
-  const criticalStations = riverStations.filter(s => s.level >= (s.danger_level || 5));
-  const warningStations  = riverStations.filter(s => s.level >= (s.alert_level || 4) && s.level < (s.danger_level || 5));
+  // ── Derived stats ─────────────────────────────────────────────────────────
+  const criticalStations = riverStations.filter(s => s.level >= (s.danger_level ?? 5));
+  const warningStations  = riverStations.filter(s => s.level >= (s.alert_level ?? 4) && s.level < (s.danger_level ?? 5));
   const activeAlertCount = criticalStations.length + warningStations.length;
 
-  const highRainfallDistricts = rainfallData.filter(d => (d.rainfall_3h || 0) >= 7.5);
-  const maxRainfallDistrict   = rainfallData.length
-    ? rainfallData.reduce((max, d) => (d.rainfall_3h || 0) > (max.rainfall_3h || 0) ? d : max, rainfallData[0])
+  const maxRainStation = rainfallData.length
+    ? rainfallData.reduce((m, d) => (d.rainfall_3h ?? 0) > (m.rainfall_3h ?? 0) ? d : m, rainfallData[0])
+    : null;
+  const avgRainfall = rainfallData.length
+    ? (rainfallData.reduce((s, d) => s + (d.rainfall_3h ?? 0), 0) / rainfallData.length).toFixed(1)
     : null;
 
-  // Water-level risk: how close is the highest station to its danger level
-  const waterLevelRisk = highestRiverStation && highestRiverStation.danger_level
-    ? Math.min(100, Math.round((highestRiverStation.level / highestRiverStation.danger_level) * 100))
-    : 0;
+  const highestStation = riverStations.length
+    ? riverStations.reduce((m, s) => (s.level ?? 0) > (m.level ?? 0) ? s : m, riverStations[0])
+    : null;
 
-  // Rainfall risk: fraction of districts with ≥50 mm / 24h
+  const waterLevelRisk = highestStation?.danger_level
+    ? Math.min(100, Math.round((highestStation.level / highestStation.danger_level) * 100))
+    : 0;
   const rainfallRisk = rainfallData.length
-    ? Math.min(100, Math.round((rainfallData.filter(d => (d.rainfall_24h || 0) >= 50).length / rainfallData.length) * 100))
+    ? Math.min(100, Math.round((rainfallData.filter(d => (d.rainfall_24h ?? 0) >= 50).length / rainfallData.length) * 100))
     : 0;
-
-  // Flood risk index: weighted average
   const floodRiskIndex = Math.round(waterLevelRisk * 0.5 + rainfallRisk * 0.5);
 
-  const summaryCards = [
+  // ── Live alerts from station data ─────────────────────────────────────────
+  const liveAlerts = [
+    ...criticalStations.map(s => ({
+      id: `c-${s.id}`, severity: 'critical',
+      title: `${s.river ?? s.location} — critical`,
+      location: s.location,
+      message: `${s.level.toFixed(2)} m / danger ${s.danger_level} m`,
+    })),
+    ...warningStations.map(s => ({
+      id: `w-${s.id}`, severity: 'high',
+      title: `${s.river ?? s.location} — warning`,
+      location: s.location,
+      message: `${s.level.toFixed(2)} m / alert ${s.alert_level} m`,
+    })),
+    ...rainfallData.filter(d => (d.rainfall_3h ?? 0) >= 7.5).slice(0, 3).map(d => ({
+      id: `r-${d.id}`, severity: 'medium',
+      title: `${d.district} — heavy rainfall`,
+      location: d.district,
+      message: `${d.rainfall_3h?.toFixed(1)} mm/h · 24 h: ${d.rainfall_24h?.toFixed(0)} mm`,
+    })),
+  ].slice(0, 8);
+
+  const summaryStats = [
     {
-      title:   'Avg Hourly Rainfall',
-      value:   loading ? '…' : `${avgRainfallHourly} mm/h`,
-      icon:    CloudRain,
-      color:   'text-blue-400',
-      badge:   highRainfallDistricts.length > 0 ? `${highRainfallDistricts.length} heavy` : null,
-      badgeCls:'bg-orange-500/20 text-orange-400',
+      label: 'Avg rainfall',
+      value: loading ? null : (avgRainfall ? `${avgRainfall} mm/h` : '–'),
+      sub: maxRainStation ? `Max: ${maxRainStation.district} ${maxRainStation.rainfall_3h?.toFixed(1)} mm/h` : null,
+      color: (parseFloat(avgRainfall) ?? 0) >= 7.5 ? '#f59e0b' : '#ededed',
+      icon: CloudRain,
     },
     {
-      title:   'Highest River Level',
-      value:   loading ? '…' : highestRiverLevel,
-      icon:    Waves,
-      color:   'text-cyan-400',
-      badge:   highestRiverStation ? highestRiverStation.river || highestRiverStation.location : null,
-      badgeCls:'bg-cyan-500/10 text-cyan-400',
+      label: 'Highest river',
+      value: loading ? null : (highestStation ? `${highestStation.level.toFixed(2)} m` : '–'),
+      sub: highestStation ? `${highestStation.river ?? ''} · ${highestStation.location}` : null,
+      color: highestStation?.level >= (highestStation?.danger_level ?? 5) ? '#e5484d' : highestStation?.level >= (highestStation?.alert_level ?? 4) ? '#f59e0b' : '#ededed',
+      icon: Waves,
     },
     {
-      title:   'Flood Risk Index',
-      value:   loading ? '…' : `${floodRiskIndex}%`,
-      icon:    AlertTriangle,
-      color:   floodRiskIndex >= 70 ? 'text-red-400' : floodRiskIndex >= 40 ? 'text-amber-400' : 'text-emerald-400',
-      badge:   floodRiskIndex >= 70 ? 'High' : floodRiskIndex >= 40 ? 'Moderate' : 'Low',
-      badgeCls: floodRiskIndex >= 70 ? 'bg-red-500/20 text-red-400' : floodRiskIndex >= 40 ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400',
+      label: 'Flood risk index',
+      value: loading ? null : `${floodRiskIndex}%`,
+      sub: floodRiskIndex >= 70 ? 'Evacuate flood zones' : floodRiskIndex >= 40 ? 'Monitor closely' : 'Within normal range',
+      color: RISK_BAR_COLOR(floodRiskIndex),
+      icon: AlertTriangle,
     },
     {
-      title:   'Active Alerts',
-      value:   loading ? '…' : String(activeAlertCount),
-      icon:    Activity,
-      color:   activeAlertCount > 0 ? 'text-red-400' : 'text-emerald-400',
-      badge:   criticalStations.length > 0 ? `${criticalStations.length} critical` : null,
-      badgeCls:'bg-red-500/20 text-red-400',
+      label: 'Active alerts',
+      value: loading ? null : String(activeAlertCount),
+      sub: criticalStations.length > 0 ? `${criticalStations.length} critical` : activeAlertCount === 0 ? 'All stations normal' : `${warningStations.length} warning`,
+      color: activeAlertCount > 0 ? '#f59e0b' : '#4cc38a',
+      icon: Activity,
     },
   ];
 
-  // ── Dynamic alerts from live station data ─────────────────────────────────
-  const liveAlerts = [
-    ...criticalStations.map(s => ({
-      id: `r-crit-${s.id}`,
-      title: `River Level Critical — ${s.river || s.location}`,
-      location: s.location,
-      severity: 'critical',
-      message: `Water at ${s.level.toFixed(1)} m, danger level is ${s.danger_level} m. Evacuation may be required.`,
-      time: 'Live',
-    })),
-    ...warningStations.map(s => ({
-      id: `r-warn-${s.id}`,
-      title: `River Level Warning — ${s.river || s.location}`,
-      location: s.location,
-      severity: 'high',
-      message: `Water at ${s.level.toFixed(1)} m, approaching danger level of ${s.danger_level} m.`,
-      time: 'Live',
-    })),
-    ...highRainfallDistricts.slice(0, 2).map(d => ({
-      id: `rf-${d.id}`,
-      title: `Heavy Rainfall — ${d.district}`,
-      location: d.district,
-      severity: 'medium',
-      message: `${d.rainfall_3h?.toFixed(1)} mm/h recorded. 24h total: ${d.rainfall_24h?.toFixed(0)} mm.`,
-      time: 'Live',
-    })),
-  ].slice(0, 6);
-
-  // Risk bar helper
-  function RiskBar({ label, pct, valueLabel, subLabel, color }) {
-    return (
-      <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-slate-400">{label}</span>
-          <span className={`text-sm font-semibold ${color}`}>{valueLabel}</span>
-        </div>
-        <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
-          <div
-            className="h-full transition-all duration-700 ease-out"
-            style={{
-              width: `${pct}%`,
-              background: pct >= 70
-                ? 'linear-gradient(to right, #eab308, #ef4444)'
-                : pct >= 40
-                  ? 'linear-gradient(to right, #22c55e, #eab308)'
-                  : 'linear-gradient(to right, #22d3ee, #22c55e)',
-            }}
-          />
-        </div>
-        {subLabel && <p className="text-xs text-slate-500 mt-2">{subLabel}</p>}
-      </div>
-    );
-  }
-
   return (
-    <Layout>
-      <div className="space-y-8">
+    <Layout alertCount={activeAlertCount} feedUpdatedAt={lastUpdated}>
+      <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        {/* ── Page title row ──────────────────────────────────────────── */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
-            <h1 className="text-3xl font-bold text-white">Dashboard Overview</h1>
-            <p className="text-slate-400 mt-1 text-sm">Real-time disaster monitoring across Karnataka</p>
+            <h1 style={{ fontSize: 20, fontWeight: 500, color: '#ededed', margin: 0 }}>Karnataka — overview</h1>
+            <p style={{ fontSize: 12, color: '#85858b', marginTop: 4 }}>
+              {lastUpdated
+                ? `Station data updated ${lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })} IST`
+                : 'Loading station data…'}
+            </p>
           </div>
-          <div className="flex items-center gap-3 text-xs text-slate-400">
-            {lastUpdated && (
-              <span className="flex items-center gap-1.5">
-                <RefreshCw className="h-3.5 w-3.5" />
-                Updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            )}
-            <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 border text-xs font-medium ${
-              apiStatus === 'online'  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-              apiStatus === 'offline' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
-                                       'bg-slate-700/50 text-slate-400 border-slate-700'
-            }`}>
-              {apiStatus === 'online'  ? <CheckCircle2 className="h-3 w-3" /> :
-               apiStatus === 'offline' ? <XCircle className="h-3 w-3" /> :
-                                        <RefreshCw className="h-3 w-3 animate-spin" />}
-              Flask API {apiStatus === 'checking' ? '…' : apiStatus}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                fontSize: 11, padding: '3px 8px', borderRadius: 6,
+                fontFamily: 'Geist Mono, monospace',
+                backgroundColor: apiStatus === 'online' ? 'rgba(76,195,138,0.1)' : apiStatus === 'offline' ? 'rgba(229,72,77,0.1)' : 'rgba(237,237,237,0.06)',
+                color: apiStatus === 'online' ? '#4cc38a' : apiStatus === 'offline' ? '#e5484d' : '#85858b',
+                border: `1px solid ${apiStatus === 'online' ? 'rgba(76,195,138,0.2)' : apiStatus === 'offline' ? 'rgba(229,72,77,0.2)' : 'rgba(237,237,237,0.08)'}`,
+              }}
+            >
+              {apiStatus === 'online' ? <CheckCircle2 className="h-3 w-3" strokeWidth={1.5} /> : apiStatus === 'offline' ? <XCircle className="h-3 w-3" strokeWidth={1.5} /> : <RefreshCw className="h-3 w-3" strokeWidth={1.5} />}
+              Flask {apiStatus === 'checking' ? '…' : apiStatus}
             </span>
           </div>
         </div>
 
-        {/* ── Summary Cards ──────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {summaryCards.map(card => {
-            const Icon = card.icon;
-            return (
-              <div key={card.title} className="card card-hover p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-slate-400">{card.title}</p>
-                    <p className={`text-3xl font-bold mt-1 ${card.color}`}>{card.value}</p>
-                    {card.badge && (
-                      <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${card.badgeCls}`}>
-                        {card.badge}
-                      </span>
-                    )}
+        {/* ── Error state ─────────────────────────────────────────────── */}
+        {loadError && (
+          <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', backgroundColor: 'rgba(229,72,77,0.07)', border: '1px solid rgba(229,72,77,0.18)', borderRadius: 8, color: '#e5484d' }}>
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" strokeWidth={1.5} style={{ marginTop: 1 }} />
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>Station data unavailable</p>
+              <p style={{ fontSize: 11, color: '#a1a1a6', margin: '2px 0 0' }}>Check your network connection or the /api/locations endpoint. Retrying every 5 minutes.</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── 4-stat row ──────────────────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}
+          className="grid-cols-2 sm:grid-cols-4">
+          {loading
+            ? [0,1,2,3].map(i => <StatSkeleton key={i} />)
+            : summaryStats.map(stat => {
+                const Icon = stat.icon;
+                return (
+                  <div key={stat.label} className="card" style={{ padding: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 12, color: '#a1a1a6' }}>{stat.label}</span>
+                      <Icon className="h-4 w-4 flex-shrink-0" style={{ color: '#85858b', marginTop: 1 }} strokeWidth={1.5} />
+                    </div>
+                    <p className="num" style={{ fontSize: 28, fontWeight: 500, color: stat.color, margin: '6px 0 4px', lineHeight: 1 }}>
+                      {stat.value ?? '–'}
+                    </p>
+                    {stat.sub && <p style={{ fontSize: 11, color: '#85858b' }}>{stat.sub}</p>}
                   </div>
-                  <div className={`p-3 rounded-lg bg-slate-800 shrink-0 ${card.color}`}>
-                    <Icon className="h-6 w-6" />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
         </div>
 
-        {/* ── Disaster Sections ──────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
-          {DISASTER_TYPES.map(d => (
-            <a key={d.key} href={d.href} className="card card-hover p-5 no-underline block group">
-              <span className="text-2xl">{d.icon}</span>
-              <p className="text-base font-semibold text-white mt-3 group-hover:text-cyan-300 transition-colors">{d.label}</p>
-              {d.key === 'flood' && !loading ? (
-                <>
-                  <p className={`text-2xl font-bold mt-2 ${floodRiskIndex >= 70 ? 'text-red-400' : floodRiskIndex >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                    {floodRiskIndex}%
-                  </p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {floodRiskIndex >= 70 ? 'High risk' : floodRiskIndex >= 40 ? 'Moderate risk' : 'Low risk'}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-lg font-bold text-slate-500 mt-2">Run assessment</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Click to open predictor</p>
-                </>
-              )}
-            </a>
-          ))}
-        </div>
+        {/* ── Map + risk indicators ────────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12 }}
+          className="grid-cols-1 lg:grid-cols-[1fr_280px]">
 
-        {/* ── Map + Risk Bars ────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Flood Risk Map */}
-          <div className="card p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-white">Flood Risk Map</h2>
-              <div className="flex items-center gap-4 text-xs text-slate-400">
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-green-500 inline-block"/>Safe</span>
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-orange-500 inline-block"/>Warning</span>
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-500 inline-block"/>Danger</span>
+          {/* Map — primary region */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(237,237,237,0.07)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: '#ededed' }}>Flood risk map</span>
+              <div style={{ display: 'flex', gap: 12 }}>
+                {[{ color: '#4cc38a', label: 'Normal' }, { color: '#f59e0b', label: 'Alert' }, { color: '#e5484d', label: 'Danger' }].map(l => (
+                  <span key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#85858b' }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: l.color, display: 'inline-block' }} />
+                    {l.label}
+                  </span>
+                ))}
               </div>
             </div>
-            <div className="h-72 rounded-lg overflow-hidden">
+            <div style={{ height: 280 }}>
               <FloodRiskMap />
             </div>
           </div>
 
-          {/* Live Risk Indicators */}
-          <div className="card p-6">
-            <h2 className="text-xl font-semibold text-white mb-5">Live Risk Indicators</h2>
-            <div className="space-y-4">
-              <RiskBar
-                label="Water Level Risk"
-                pct={waterLevelRisk}
-                valueLabel={`${waterLevelRisk}%`}
-                subLabel={highestRiverStation
-                  ? `${highestRiverStation.river || 'River'} at ${highestRiverStation.level?.toFixed(1)} m / danger ${highestRiverStation.danger_level} m`
-                  : 'No station data'}
-                color={waterLevelRisk >= 70 ? 'text-red-400' : waterLevelRisk >= 40 ? 'text-amber-400' : 'text-cyan-400'}
-              />
-              <RiskBar
-                label="Rainfall Risk"
-                pct={rainfallRisk}
-                valueLabel={`${rainfallRisk}%`}
-                subLabel={maxRainfallDistrict
-                  ? `Highest: ${maxRainfallDistrict.district} — ${maxRainfallDistrict.rainfall_24h?.toFixed(0)} mm/24h`
-                  : 'No rainfall data'}
-                color={rainfallRisk >= 70 ? 'text-red-400' : rainfallRisk >= 40 ? 'text-amber-400' : 'text-blue-400'}
-              />
-              <div className="p-4 bg-gradient-to-br from-slate-800/60 to-slate-900/60 rounded-lg border border-slate-700">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-400 mb-1">Overall Flood Risk Index</p>
-                    <p className={`text-3xl font-bold ${floodRiskIndex >= 70 ? 'text-red-400' : floodRiskIndex >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                      {loading ? '…' : `${floodRiskIndex}%`}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      {floodRiskIndex >= 70 ? 'High — elevated flood risk' : floodRiskIndex >= 40 ? 'Moderate to High Risk' : 'Low — conditions normal'}
-                    </p>
-                  </div>
-                  <AlertTriangle className={`h-10 w-10 ${floodRiskIndex >= 70 ? 'text-red-400' : floodRiskIndex >= 40 ? 'text-amber-400' : 'text-slate-600'}`} />
-                </div>
-                <p className="text-xs text-slate-500 mt-3">
-                  Index = (Water Level Risk × 0.5) + (Rainfall Risk × 0.5)
-                </p>
+          {/* Risk indicators — supporting region */}
+          <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <p style={{ fontSize: 13, fontWeight: 500, color: '#ededed', margin: 0 }}>Risk indicators</p>
+
+            <RiskBar
+              label="Water level"
+              pct={waterLevelRisk}
+              subLabel={highestStation ? `${highestStation.river ?? ''} ${highestStation.level?.toFixed(2)} / ${highestStation.danger_level} m` : undefined}
+            />
+            <RiskBar
+              label="Rainfall coverage"
+              pct={rainfallRisk}
+              subLabel={`${rainfallData.filter(d => (d.rainfall_24h ?? 0) >= 50).length} of ${rainfallData.length} districts ≥ 50 mm/24h`}
+            />
+
+            {/* Flood risk index — the one coloured figure */}
+            <div style={{ marginTop: 8, paddingTop: 16, borderTop: '1px solid rgba(237,237,237,0.07)' }}>
+              <p style={{ fontSize: 11, color: '#85858b', marginBottom: 4 }}>Flood risk index</p>
+              <p className="num" style={{ fontSize: 36, fontWeight: 500, color: RISK_BAR_COLOR(floodRiskIndex), lineHeight: 1, margin: 0 }}>
+                {loading ? '–' : `${floodRiskIndex}%`}
+              </p>
+              <p style={{ fontSize: 11, color: '#85858b', marginTop: 6 }}>
+                {floodRiskIndex >= 70 ? 'Evacuate flood zones' : floodRiskIndex >= 40 ? 'Monitor river levels' : 'Normal conditions'}
+              </p>
+            </div>
+
+            {/* Hazard quick-links */}
+            <div style={{ marginTop: 4, paddingTop: 12, borderTop: '1px solid rgba(237,237,237,0.07)' }}>
+              <p style={{ fontSize: 10, color: '#85858b', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginBottom: 8 }}>Predictions</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                {HAZARD_LINKS.map(h => {
+                  const Icon = h.icon;
+                  return (
+                    <a key={h.key} href={h.href} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 6px', borderRadius: 6, fontSize: 12, color: '#a1a1a6', textDecoration: 'none', transition: 'background-color 120ms, color 120ms' }}
+                      onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#232325'; e.currentTarget.style.color = '#ededed'; }}
+                      onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#a1a1a6'; }}>
+                      <Icon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      {h.label}
+                    </a>
+                  );
+                })}
               </div>
             </div>
           </div>
         </div>
 
-        {/* ── Live Trends ────────────────────────────────────────────────── */}
+        {/* ── Live Trends ──────────────────────────────────────────────── */}
         <LiveTrends />
 
-        {/* ── Active Alerts ──────────────────────────────────────────────── */}
-        <div className="card p-6">
-          <h2 className="text-xl font-semibold text-white mb-5">Active Alerts</h2>
+        {/* ── Active alerts table ──────────────────────────────────────── */}
+        <section className="card" style={{ overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(237,237,237,0.07)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#ededed' }}>
+              Active alerts
+              {activeAlertCount > 0 && <span className="badge badge-warn" style={{ marginLeft: 8 }}>{activeAlertCount}</span>}
+            </span>
+          </div>
+
           {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[1,2,3].map(i => <div key={i} className="h-24 animate-pulse rounded-lg bg-slate-800" />)}
+            <div style={{ padding: 20 }}>
+              {[0,1,2].map(i => <div key={i} className="skeleton" style={{ height: 36, borderRadius: 4, marginBottom: 4 }} />)}
             </div>
           ) : liveAlerts.length === 0 ? (
-            <div className="flex items-center gap-3 text-emerald-400">
-              <CheckCircle2 className="h-5 w-5" />
-              <span>No active alerts — all stations within normal levels.</span>
+            <div style={{ padding: 24, display: 'flex', alignItems: 'center', gap: 8, color: '#4cc38a' }}>
+              <CheckCircle2 className="h-4 w-4" strokeWidth={1.5} />
+              <span style={{ fontSize: 13 }}>All stations within normal levels</span>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {liveAlerts.map(alert => (
-                <div key={alert.id} className="p-4 rounded-lg border border-slate-700 bg-slate-800/40">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <h3 className="text-sm font-medium text-white leading-snug">{alert.title}</h3>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium border ${SEVERITY_CLASS[alert.severity] ?? SEVERITY_CLASS.low}`}>
-                      {alert.severity.toUpperCase()}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 mb-1">{alert.location}</p>
-                  <p className="text-sm text-slate-300 leading-relaxed">{alert.message}</p>
-                  <p className="text-xs text-slate-500 mt-2">{alert.time}</p>
-                </div>
-              ))}
+            <div style={{ overflowX: 'auto' }}>
+              <table className="ops-table">
+                <thead>
+                  <tr>
+                    <th>Alert</th>
+                    <th>Location</th>
+                    <th>Reading</th>
+                    <th>Severity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveAlerts.map(alert => (
+                    <tr key={alert.id}>
+                      <td className="primary">{alert.title}</td>
+                      <td>{alert.location}</td>
+                      <td className="num">{alert.message}</td>
+                      <td>
+                        <span className={`badge ${SEVERITY_BADGE[alert.severity] ?? 'badge-muted'}`}>
+                          {alert.severity}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
-        </div>
+        </section>
 
-        {/* ── System Status ──────────────────────────────────────────────── */}
-        <div className="card p-6">
-          <h2 className="text-xl font-semibold text-white mb-4">System Status</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              { label: 'Flask Prediction API', ok: apiStatus === 'online' },
-              { label: `River Stations (${riverStations.length} online)`, ok: riverStations.length > 0 },
-              { label: `Rainfall Stations (${rainfallData.length} online)`, ok: rainfallData.length > 0 },
-            ].map(item => (
-              <div key={item.label} className="flex items-center gap-3">
-                <div className={`w-2.5 h-2.5 rounded-full ${item.ok ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                <span className="text-sm text-slate-300">{item.label}</span>
+        {/* ── System status ────────────────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}
+          className="grid-cols-1 sm:grid-cols-3">
+          {[
+            { label: 'Flask prediction API', ok: apiStatus === 'online', detail: apiStatus === 'checking' ? 'Checking…' : apiStatus },
+            { label: `River stations`,       ok: riverStations.length > 0, detail: `${riverStations.length} reporting` },
+            { label: `Rainfall stations`,    ok: rainfallData.length > 0,  detail: `${rainfallData.length} districts` },
+          ].map(s => (
+            <div key={s.label} className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: s.ok ? '#4cc38a' : '#e5484d', flexShrink: 0 }} />
+              <div>
+                <p style={{ fontSize: 12, color: '#ededed', margin: 0 }}>{s.label}</p>
+                <p style={{ fontSize: 11, color: '#85858b', margin: 0 }}>{s.detail}</p>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
 
       </div>

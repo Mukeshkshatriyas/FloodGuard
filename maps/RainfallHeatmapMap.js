@@ -1,105 +1,71 @@
-import { useState, useEffect } from "react";
-import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
-import { fetchRainfallLocations } from "../utils/mapApi";
+/**
+ * RainfallHeatmapMap — district-level rainfall intensity overlay
+ *
+ * Dark basemap (CartoDB dark_matter).
+ * Single-hue blue sequential ramp: pale blue → mid blue → deep blue.
+ * Circle radius proportional to rainfall_3h (hourly proxy).
+ * Legend: exact thresholds with teal/amber/risk colours consistent with the design system.
+ */
+
+import { MapContainer, TileLayer, CircleMarker, Tooltip } from 'react-leaflet';
 
 const karnatakaCenter = [14.5, 75.6];
 
-const defaultRainfallCells = [
-  { district: "Kodagu", coords: [12.45, 75.78], rainfall_24h: 92.1, rainfall_3h: 15.3, intensity: "high" },
-  { district: "Uttara Kannada", coords: [14.80, 74.13], rainfall_24h: 125.6, rainfall_3h: 22.4, intensity: "high" },
-  { district: "Shivamogga", coords: [13.93, 75.57], rainfall_24h: 65.3, rainfall_3h: 8.9, intensity: "medium" },
-  { district: "Belagavi", coords: [15.85, 74.50], rainfall_24h: 35.2, rainfall_3h: 4.1, intensity: "medium" },
-  { district: "Bengaluru Urban", coords: [12.97, 77.59], rainfall_24h: 22.5, rainfall_3h: 2.1, intensity: "low" }
+// Single-hue sequential blue ramp (light → heavy)
+const getRainfallColor = (mmPerHour) => {
+  if (mmPerHour >= 7.5) return '#2563eb';  // heavy — deep blue
+  if (mmPerHour >= 2.5) return '#60a5fa';  // moderate — mid blue
+  return '#bfdbfe';                          // light — pale blue
+};
+
+const LEGEND = [
+  { label: '< 2.5 mm/h',  color: '#bfdbfe' },
+  { label: '2.5–7.5 mm/h', color: '#60a5fa' },
+  { label: '> 7.5 mm/h',  color: '#2563eb' },
 ];
 
-const getRiskLevel = (rainfall24h) => {
-  if (rainfall24h >= 100) return "high";
-  if (rainfall24h >= 50) return "medium";
-  return "low";
-};
-
-const riskColor = {
-  low: "#22c55e",
-  medium: "#facc15",
-  high: "#ef4444"
-};
-
-export default function RainfallHeatmapMap() {
-  const [rainfallCells, setRainfallCells] = useState(defaultRainfallCells);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchLiveRainfall = async () => {
-      try {
-        const data = await fetchRainfallLocations();
-        if (data && data.length > 0) {
-          const transformedData = data.map(location => ({
-            district: location.district,
-            coords: [location.lat, location.lng],
-            rainfall_24h: location.rainfall_24h,
-            rainfall_3h: location.rainfall_3h,
-            intensity: location.intensity
-          }));
-          setRainfallCells(transformedData);
-        }
-      } catch (error) {
-        console.error('Error fetching rainfall data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchLiveRainfall();
-    
-    // Refresh every 5 minutes
-    const interval = setInterval(fetchLiveRainfall, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
+export default function RainfallHeatmapMap({ locations = [] }) {
+  const validLocations = locations.filter(l => Number.isFinite(l.lat) && Number.isFinite(l.lon));
 
   return (
-    <div className="h-[360px] w-full overflow-hidden rounded-xl border border-slate-800/80 bg-slate-950/60">
+    <div style={{ position: 'relative', height: 360, width: '100%', overflow: 'hidden', borderRadius: 8, border: '1px solid rgba(237,237,237,0.07)' }}>
       <MapContainer
         center={karnatakaCenter}
         zoom={7}
         scrollWheelZoom={false}
-        className="h-full w-full"
+        style={{ height: '100%', width: '100%' }}
       >
         <TileLayer
-          attribution='&copy; <a href="https://cartodb.com/">CartoDB</a>'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
         />
 
-        {rainfallCells.map((cell) => {
-          const risk = getRiskLevel(cell.rainfall_24h);
+        {validLocations.map(loc => {
+          const mmh = loc.rainfall ?? loc.rainfall_3h ?? 0;
+          const color = getRainfallColor(mmh);
+          // Radius: base 8px + scale with intensity (capped at 28px)
+          const radius = Math.min(28, 8 + mmh * 1.2);
           return (
             <CircleMarker
-              key={cell.district}
-              center={cell.coords}
-              radius={12}
-              pathOptions={{
-                color: riskColor[risk],
-                fillColor: riskColor[risk],
-                fillOpacity: 0.6
-              }}
+              key={loc.district ?? loc.id}
+              center={[loc.lat, loc.lon]}
+              radius={radius}
+              pathOptions={{ color, fillColor: color, fillOpacity: 0.55, weight: 1 }}
             >
               <Tooltip>
-                <div className="space-y-1">
-                  <div className="font-semibold text-sm">{cell.district}</div>
-                  <div className="text-xs">
-                    24h Rainfall:{" "}
-                    <span className="font-mono font-semibold">{cell.rainfall_24h?.toFixed(1) || 'N/A'} mm</span>
-                  </div>
-                  <div className="text-xs">
-                    3h Rainfall:{" "}
-                    <span className="font-mono font-semibold">
-                      {cell.rainfall_3h?.toFixed(1) || 'N/A'} mm
-                    </span>
-                  </div>
-                  <div className="text-xs">
-                    Risk:{" "}
-                    <span className="font-semibold capitalize text-emerald-200">
-                      {risk}
-                    </span>
+                <div style={{ fontSize: 12, fontFamily: 'Geist, Inter, sans-serif' }}>
+                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{loc.district}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '1px 10px' }}>
+                    <span style={{ color: '#6b7280' }}>Hourly</span>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{mmh.toFixed(1)} mm/h</span>
+                    {(loc.rainfall_24h != null) && <>
+                      <span style={{ color: '#6b7280' }}>24 h</span>
+                      <span style={{ fontFamily: 'monospace', textAlign: 'right' }}>{loc.rainfall_24h.toFixed(0)} mm</span>
+                    </>}
+                    {(loc.temperature != null) && <>
+                      <span style={{ color: '#6b7280' }}>Temp</span>
+                      <span style={{ fontFamily: 'monospace', textAlign: 'right' }}>{loc.temperature} °C</span>
+                    </>}
                   </div>
                 </div>
               </Tooltip>
@@ -107,7 +73,31 @@ export default function RainfallHeatmapMap() {
           );
         })}
       </MapContainer>
+
+      {/* Legend */}
+      <div style={{
+        position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
+        display: 'flex', flexDirection: 'column', gap: 4,
+        backgroundColor: 'rgba(15,15,16,0.88)', borderRadius: 6,
+        padding: '8px 10px', border: '1px solid rgba(237,237,237,0.08)',
+      }}>
+        <p style={{ fontSize: 10, color: '#85858b', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>Rainfall</p>
+        {LEGEND.map(l => (
+          <span key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#a1a1a6', fontFamily: 'Geist Mono, monospace' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: l.color, display: 'inline-block', flexShrink: 0 }} />
+            {l.label}
+          </span>
+        ))}
+      </div>
+
+      {validLocations.length === 0 && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          backgroundColor: 'rgba(20,20,21,0.7)', zIndex: 999,
+        }}>
+          <p style={{ fontSize: 13, color: '#85858b' }}>No rainfall data available</p>
+        </div>
+      )}
     </div>
   );
 }
-

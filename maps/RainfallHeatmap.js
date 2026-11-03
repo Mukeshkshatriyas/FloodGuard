@@ -20,10 +20,10 @@ const RainfallHeatmap = () => {
     // Initialize map centered on Karnataka
     const map = L.map(mapRef.current).setView([14.5, 75.5], 7);
 
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-      maxZoom: 18,
+    // Add CartoDB Voyager tiles (grey basemap)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom: 19,
     }).addTo(map);
 
     // Sample rainfall data for Karnataka districts

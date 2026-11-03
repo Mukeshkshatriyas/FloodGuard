@@ -83,15 +83,17 @@ const defaultRainfallAreas = [
 ];
 
 const getRiskColor = (level, alertLevel, dangerLevel) => {
-  if (level >= dangerLevel) return '#ef4444'; // red-500 (high risk)
-  if (level >= alertLevel) return '#f97316'; // orange-500 (medium risk)
-  return '#22c55e'; // green-500 (low risk)
+  // Single-hue sequential ramp: teal (safe) → amber (alert) → red (danger)
+  if (level >= dangerLevel) return '#e5484d';  // risk-red
+  if (level >= alertLevel)  return '#f59e0b';  // warn-amber
+  return '#4cc38a';                             // ok-green
 };
 
 const getRainfallColor = (rainfall24h) => {
-  if (rainfall24h >= 100) return '#dc2626'; // red-600 (heavy)
-  if (rainfall24h >= 50) return '#ea580c'; // orange-600 (moderate)
-  return '#16a34a'; // green-600 (light)
+  // Single-hue blue sequential ramp
+  if (rainfall24h >= 100) return '#2563eb'; // heavy — deep blue
+  if (rainfall24h >= 50)  return '#60a5fa'; // moderate — mid blue
+  return '#bfdbfe';                          // light — pale blue
 };
 
 export default function FloodRiskMap() {
@@ -146,11 +148,11 @@ export default function FloodRiskMap() {
       className="rounded-lg"
     >
       <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
       />
 
-      {/* Rainfall intensity circles */}
+      {/* Rainfall intensity circles — single-hue blue sequential ramp */}
       {rainfallAreas.map((area) => (
         <Circle
           key={`rainfall-${area.id}`}
@@ -159,71 +161,63 @@ export default function FloodRiskMap() {
           pathOptions={{
             color: getRainfallColor(area.rainfall_24h),
             fillColor: getRainfallColor(area.rainfall_24h),
-            fillOpacity: 0.3,
-            weight: 2
+            fillOpacity: 0.18,
+            weight: 1,
           }}
         >
           <Popup>
-            <div className="text-sm">
-              <h3 className="font-semibold">{area.district || 'Rainfall Area'}</h3>
-              <div className="mt-2 space-y-1">
-                <p>Rainfall (24h): <span className="font-medium">{area.rainfall_24h?.toFixed(1) || 'N/A'} mm</span></p>
-                <p>Rainfall (3h): <span className="font-medium">{area.rainfall_3h?.toFixed(1) || 'N/A'} mm</span></p>
-                <p>Intensity: <span className="font-medium capitalize">{area.intensity || 'unknown'}</span></p>
+            <div style={{ fontSize: 12, fontFamily: 'Geist, Inter, sans-serif', minWidth: 160 }}>
+              <p style={{ fontWeight: 600, marginBottom: 6 }}>{area.district ?? 'Rainfall area'}</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '2px 12px' }}>
+                <span style={{ color: '#6b7280' }}>24 h rainfall</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{area.rainfall_24h?.toFixed(1) ?? '–'} mm</span>
+                <span style={{ color: '#6b7280' }}>3 h rainfall</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{area.rainfall_3h?.toFixed(1) ?? '–'} mm</span>
+                <span style={{ color: '#6b7280' }}>Intensity</span>
+                <span style={{ textAlign: 'right', textTransform: 'capitalize' }}>{area.intensity ?? '–'}</span>
               </div>
             </div>
           </Popup>
         </Circle>
       ))}
 
-      {/* River gauge station markers */}
-      {riverStations.map((station) => (
-        <Marker
-          key={station.id}
-          position={[station.lat, station.lng]}
-          icon={new Icon({
-            iconUrl: `data:image/svg+xml;base64,${btoa(`
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="${getRiskColor(station.level, station.alert_level, station.danger_level)}"/>
-              </svg>
-            `)}`,
-            iconSize: [24, 24],
-            iconAnchor: [12, 24],
-            popupAnchor: [0, -24]
-          })}
-        >
-          <Popup>
-            <div className="text-sm min-w-56">
-              <h3 className="font-semibold text-gray-900">{station.river} River - {station.location}</h3>
-              <div className="mt-2 space-y-1">
-                <div className="flex justify-between">
-                  <span>Current Level:</span>
-                  <span className="font-medium">{station.level?.toFixed(1) || 'N/A'} m</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Alert Level:</span>
-                  <span className="font-medium text-orange-600">{station.alert_level?.toFixed(1) || 'N/A'} m</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Danger Level:</span>
-                  <span className="font-medium text-red-600">{station.danger_level?.toFixed(1) || 'N/A'} m</span>
-                </div>
-                <div className="flex justify-between mt-3 pt-3 border-t">
-                  <span>Status:</span>
-                  <span className={`font-medium px-2 py-1 rounded text-xs ${
-                    station.level >= station.danger_level ? 'bg-red-100 text-red-800' :
-                    station.level >= station.alert_level ? 'bg-orange-100 text-orange-800' :
-                    'bg-green-100 text-green-800'
-                  }`}>
-                    {station.level >= station.danger_level ? 'CRITICAL' :
-                     station.level >= station.alert_level ? 'WARNING' : 'NORMAL'}
-                  </span>
+      {/* River gauge station markers — small diamonds (rotated squares) */}
+      {riverStations.map((station) => {
+        const color = getRiskColor(station.level, station.alert_level, station.danger_level);
+        const status = station.level >= station.danger_level ? 'critical' : station.level >= station.alert_level ? 'alert' : 'normal';
+        return (
+          <Marker
+            key={station.id}
+            position={[station.lat, station.lng]}
+            icon={new Icon({
+              // Small 10×10 diamond (rotated square) — unambiguous station symbol
+              iconUrl: `data:image/svg+xml;base64,${btoa(
+                `<svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">` +
+                `<rect x="1" y="1" width="10" height="10" rx="2" fill="${color}" fill-opacity="0.9" stroke="#0f0f10" stroke-width="1.5"/>` +
+                `</svg>`
+              )}`,
+              iconSize:    [12, 12],
+              iconAnchor:  [6, 6],
+              popupAnchor: [0, -10],
+            })}
+          >
+            <Popup>
+              <div style={{ fontSize: 12, fontFamily: 'Geist, Inter, sans-serif', minWidth: 180 }}>
+                <p style={{ fontWeight: 600, marginBottom: 4 }}>{station.river} · {station.location}</p>
+                <p style={{ color: status === 'critical' ? '#e5484d' : status === 'alert' ? '#f59e0b' : '#4cc38a', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', fontSize: 11 }}>{status}</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '2px 12px' }}>
+                  <span style={{ color: '#6b7280' }}>Current</span>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 600, textAlign: 'right', color: color }}>{station.level?.toFixed(2) ?? '–'} m</span>
+                  <span style={{ color: '#6b7280' }}>Alert</span>
+                  <span style={{ fontFamily: 'monospace', textAlign: 'right' }}>{station.alert_level?.toFixed(1) ?? '–'} m</span>
+                  <span style={{ color: '#6b7280' }}>Danger</span>
+                  <span style={{ fontFamily: 'monospace', textAlign: 'right' }}>{station.danger_level?.toFixed(1) ?? '–'} m</span>
                 </div>
               </div>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
+            </Popup>
+          </Marker>
+        );
+      })}
     </MapContainer>
   );
 }
