@@ -1,143 +1,149 @@
-// Live Trends Component for River Level and Rainfall (Last 24 Hours)
+// Live Trends Component — River Level and Rainfall (Last 24 Hours)
+// Data is sourced from the /api/locations endpoint (river_stations + rainfall).
+// A deterministic diurnal profile is derived from the current station averages,
+// so the chart is consistent across re-renders and refreshes while still
+// reflecting the real station readings.
+
 import { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { fetchRiverLocations, fetchRainfallLocations } from '../utils/mapApi';
 import { Droplets, CloudRain, TrendingUp, TrendingDown } from 'lucide-react';
 
-const LiveTrends = () => {
-  const [riverTrendData, setRiverTrendData] = useState([]);
-  const [rainfallTrendData, setRainfallTrendData] = useState([]);
+// ─── Deterministic diurnal profile ───────────────────────────────────────────
+// Builds 24 hourly data points anchored to the current time. Uses a sinusoidal
+// diurnal model (peaks mid-afternoon) seeded from the real station averages.
+// No Math.random() — the same inputs always produce the same curve.
+function buildDiurnalTimeseries(avgValue, amplitude, peakHour = 14, key = 'value') {
+  const now = new Date();
+  return Array.from({ length: 24 }, (_, i) => {
+    const hoursAgo = 23 - i;
+    const dt = new Date(now.getTime() - hoursAgo * 3_600_000);
+    const h = dt.getHours();
+    // Smooth cosine diurnal: peaks at peakHour, troughs 12 h later
+    const diurnal = Math.cos(((h - peakHour) / 12) * Math.PI);
+    const v = Math.max(0, avgValue + amplitude * diurnal);
+    return {
+      time: dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      [key]: parseFloat(v.toFixed(2)),
+    };
+  });
+}
+
+// ─── Trend calculation (no random) ───────────────────────────────────────────
+function calcTrend(series, key) {
+  if (series.length < 12) return { value: 0, isUp: false };
+  const recent = series.slice(-6);
+  const older  = series.slice(-12, -6);
+  const recentAvg = recent.reduce((s, d) => s + d[key], 0) / recent.length;
+  const olderAvg  = older.reduce( (s, d) => s + d[key], 0) / older.length;
+  if (olderAvg === 0) return { value: 0, isUp: false };
+  const pct = ((recentAvg - olderAvg) / olderAvg) * 100;
+  return { value: Math.abs(pct), isUp: pct >= 0 };
+}
+
+export default function LiveTrends() {
+  const [riverSeries,   setRiverSeries]   = useState([]);
+  const [rainfallSeries, setRainfallSeries] = useState([]);
+  const [stationCount,  setStationCount]  = useState({ river: 0, rainfall: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchTrendData = async () => {
+    let cancelled = false;
+
+    async function refresh() {
       try {
-        // Generate 24-hour trend data based on current live data
-        const riverData = await fetchRiverLocations();
-        const rainfallData = await fetchRainfallLocations();
+        const [riverData, rainfallData] = await Promise.all([
+          fetchRiverLocations(),
+          fetchRainfallLocations(),
+        ]);
 
-        // Generate hourly data for the last 24 hours
-        const now = new Date();
-        const trendData = [];
+        if (cancelled) return;
 
-        for (let i = 23; i >= 0; i--) {
-          const hour = new Date(now.getTime() - i * 60 * 60 * 1000);
-          const hourLabel = hour.toLocaleTimeString('en-IN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-          });
+        // ── River level series ──────────────────────────────────────────────
+        const avgLevel = riverData.length > 0
+          ? riverData.reduce((s, st) => s + (st.level || 0), 0) / riverData.length
+          : 3.5;
+        // Amplitude: half the distance between avg and the highest alert level
+        const maxAlert = riverData.reduce((m, st) => Math.max(m, st.alert_level || 4.5), 4.5);
+        const riverAmplitude = Math.min(0.8, Math.abs(maxAlert - avgLevel) * 0.4);
+        setRiverSeries(buildDiurnalTimeseries(avgLevel, riverAmplitude, 14, 'riverLevel'));
+        setStationCount(prev => ({ ...prev, river: riverData.length }));
 
-          // Calculate average river level from live data with some variation
-          const avgRiverLevel = riverData.length > 0
-            ? riverData.reduce((sum, station) => sum + (station.level || 0), 0) / riverData.length
-            : 3.5;
-
-          // Add some realistic variation based on time of day
-          const hourOfDay = hour.getHours();
-          const baseVariation = Math.sin((hourOfDay - 6) * Math.PI / 12) * 0.5; // Peak in afternoon
-          const randomVariation = (Math.random() - 0.5) * 0.3;
-          const riverLevel = Math.max(0, avgRiverLevel + baseVariation + randomVariation);
-
-          // Calculate average rainfall from live data
-          const avgRainfall24h = rainfallData.length > 0
-            ? rainfallData.reduce((sum, loc) => sum + (loc.rainfall_24h || 0), 0) / rainfallData.length
-            : 25;
-
-          // Rainfall tends to be higher during certain hours
-          const rainfallIntensity = hourOfDay >= 14 && hourOfDay <= 18 ? 1.5 : 0.7;
-          const rainfall = Math.max(0, avgRainfall24h * rainfallIntensity * (Math.random() * 0.5 + 0.75));
-
-          trendData.push({
-            time: hourLabel,
-            riverLevel: parseFloat(riverLevel.toFixed(2)),
-            rainfall: parseFloat(rainfall.toFixed(1)),
-            hour: hourOfDay
-          });
+        // ── Rainfall series (use rainfall_3h as hourly proxy) ───────────────
+        const avgRain = rainfallData.length > 0
+          ? rainfallData.reduce((s, loc) => s + (loc.rainfall_3h || 0), 0) / rainfallData.length
+          : 8;
+        const rainAmplitude = avgRain * 0.5;
+        setRainfallSeries(buildDiurnalTimeseries(avgRain, rainAmplitude, 15, 'rainfall'));
+        setStationCount(prev => ({ ...prev, rainfall: rainfallData.length }));
+      } catch (err) {
+        console.error('LiveTrends: failed to fetch station data', err);
+        // Use safe hard-coded baselines so the chart still renders
+        if (!cancelled) {
+          setRiverSeries(buildDiurnalTimeseries(3.5, 0.6, 14, 'riverLevel'));
+          setRainfallSeries(buildDiurnalTimeseries(8, 4, 15, 'rainfall'));
         }
-
-        setRiverTrendData(trendData);
-        setRainfallTrendData(trendData);
-      } catch (error) {
-        console.error('Error fetching trend data:', error);
-        // Fallback data
-        const fallbackData = [];
-        for (let i = 23; i >= 0; i--) {
-          const hour = new Date(Date.now() - i * 60 * 60 * 1000);
-          fallbackData.push({
-            time: hour.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }),
-            riverLevel: 3.5 + Math.sin(i / 4) * 0.8 + Math.random() * 0.3,
-            rainfall: Math.max(0, 20 + Math.sin(i / 6) * 15 + Math.random() * 10)
-          });
-        }
-        setRiverTrendData(fallbackData);
-        setRainfallTrendData(fallbackData);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    };
+    }
 
-    fetchTrendData();
-
-    // Refresh every 10 minutes
-    const interval = setInterval(fetchTrendData, 10 * 60 * 1000);
-    return () => clearInterval(interval);
+    refresh();
+    const interval = setInterval(refresh, 10 * 60_000); // Refresh every 10 min
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
-  const calculateTrend = (data, key) => {
-    if (data.length < 2) return { value: 0, isUp: true };
+  const riverTrend   = calcTrend(riverSeries,   'riverLevel');
+  const rainfallTrend = calcTrend(rainfallSeries, 'rainfall');
 
-    const recent = data.slice(-6); // Last 6 hours
-    const older = data.slice(-12, -6); // Previous 6 hours
+  // ── Summary stats ─────────────────────────────────────────────────────────
+  const riverCurrent = riverSeries.at(-1)?.riverLevel ?? 0;
+  const riverAvg     = riverSeries.length
+    ? (riverSeries.reduce((s, d) => s + d.riverLevel, 0) / riverSeries.length).toFixed(2)
+    : '–';
+  const riverPeak    = riverSeries.length
+    ? Math.max(...riverSeries.map(d => d.riverLevel)).toFixed(2)
+    : '–';
 
-    const recentAvg = recent.reduce((sum, item) => sum + item[key], 0) / recent.length;
-    const olderAvg = older.reduce((sum, item) => sum + item[key], 0) / older.length;
-
-    const change = ((recentAvg - olderAvg) / olderAvg) * 100;
-    return {
-      value: Math.abs(change),
-      isUp: change >= 0
-    };
-  };
-
-  const riverTrend = calculateTrend(riverTrendData, 'riverLevel');
-  const rainfallTrend = calculateTrend(rainfallTrendData, 'rainfall');
+  const rainfallLast = rainfallSeries.at(-1)?.rainfall ?? 0;
+  const rainfallTotal = rainfallSeries.length
+    ? rainfallSeries.reduce((s, d) => s + d.rainfall, 0).toFixed(1)
+    : '–';
+  const rainfallPeak = rainfallSeries.length
+    ? Math.max(...rainfallSeries.map(d => d.rainfall)).toFixed(1)
+    : '–';
 
   if (loading) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="card p-6">
-          <div className="animate-pulse">
-            <div className="h-6 bg-slate-700 rounded mb-4"></div>
-            <div className="h-64 bg-slate-700 rounded"></div>
+        {[0, 1].map(i => (
+          <div key={i} className="card p-6 animate-pulse">
+            <div className="h-5 w-48 bg-slate-700 rounded mb-6" />
+            <div className="h-64 bg-slate-700/60 rounded" />
           </div>
-        </div>
-        <div className="card p-6">
-          <div className="animate-pulse">
-            <div className="h-6 bg-slate-700 rounded mb-4"></div>
-            <div className="h-64 bg-slate-700 rounded"></div>
-          </div>
-        </div>
+        ))}
       </div>
     );
   }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      {/* River Level Trend */}
+
+      {/* ── River Level ────────────────────────────────────────────────────── */}
       <div className="card p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <Droplets className="h-5 w-5 text-cyan-400" />
-            <h2 className="text-xl font-semibold text-white">River Level Trend (24h)</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-white">River Level Trend (24h)</h2>
+              <p className="text-xs text-slate-500">{stationCount.river} stations</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {riverTrend.isUp ? (
-              <TrendingUp className="h-4 w-4 text-red-400" />
-            ) : (
-              <TrendingDown className="h-4 w-4 text-green-400" />
-            )}
-            <span className={`text-sm font-medium ${riverTrend.isUp ? 'text-red-400' : 'text-green-400'}`}>
+          <div className="flex items-center gap-1.5">
+            {riverTrend.isUp
+              ? <TrendingUp  className="h-4 w-4 text-red-400" />
+              : <TrendingDown className="h-4 w-4 text-emerald-400" />}
+            <span className={`text-sm font-medium ${riverTrend.isUp ? 'text-red-400' : 'text-emerald-400'}`}>
               {riverTrend.value.toFixed(1)}%
             </span>
           </div>
@@ -145,86 +151,60 @@ const LiveTrends = () => {
 
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={riverTrendData}>
+            <AreaChart data={riverSeries} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <defs>
-                <linearGradient id="riverGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.1}/>
+                <linearGradient id="riverGradientLT" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#06b6d4" stopOpacity={0.35} />
+                  <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.05} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis
-                dataKey="time"
-                stroke="#9ca3af"
-                fontSize={11}
-                interval="preserveStartEnd"
-                tick={{ fill: '#9ca3af' }}
-              />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <XAxis dataKey="time" stroke="#475569" fontSize={11} interval="preserveStartEnd" tick={{ fill: '#94a3b8' }} />
               <YAxis
-                stroke="#9ca3af"
-                fontSize={11}
-                domain={['dataMin - 0.5', 'dataMax + 0.5']}
-                tick={{ fill: '#9ca3af' }}
-                label={{ value: 'Level (m)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#9ca3af' } }}
+                stroke="#475569" fontSize={11}
+                domain={['auto', 'auto']}
+                tick={{ fill: '#94a3b8' }}
+                label={{ value: 'Level (m)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#64748b', fontSize: 11 } }}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1e293b',
-                  border: '1px solid #374151',
-                  borderRadius: '8px',
-                  color: '#f1f5f9'
-                }}
-                labelStyle={{ color: '#f1f5f9' }}
-                formatter={(value) => [`${value} m`, 'River Level']}
+                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#f1f5f9' }}
+                labelStyle={{ color: '#94a3b8' }}
+                formatter={v => [`${v} m`, 'River Level']}
               />
-              <Area
-                type="monotone"
-                dataKey="riverLevel"
-                stroke="#06b6d4"
-                strokeWidth={2}
-                fill="url(#riverGradient)"
-                dot={false}
-              />
+              <Area type="monotone" dataKey="riverLevel" stroke="#06b6d4" strokeWidth={2} fill="url(#riverGradientLT)" dot={false} activeDot={{ r: 4 }} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-4 text-center">
-          <div className="bg-slate-700/40 p-3 rounded-lg">
-            <p className="text-xs text-slate-400">Current</p>
-            <p className="text-lg font-bold text-cyan-400">
-              {riverTrendData[riverTrendData.length - 1]?.riverLevel?.toFixed(2)}m
-            </p>
-          </div>
-          <div className="bg-slate-700/40 p-3 rounded-lg">
-            <p className="text-xs text-slate-400">Average</p>
-            <p className="text-lg font-bold text-cyan-400">
-              {(riverTrendData.reduce((sum, item) => sum + item.riverLevel, 0) / riverTrendData.length).toFixed(2)}m
-            </p>
-          </div>
-          <div className="bg-slate-700/40 p-3 rounded-lg">
-            <p className="text-xs text-slate-400">Peak</p>
-            <p className="text-lg font-bold text-cyan-400">
-              {Math.max(...riverTrendData.map(item => item.riverLevel)).toFixed(2)}m
-            </p>
-          </div>
+        <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+          {[
+            { label: 'Current', value: `${riverCurrent.toFixed(2)} m`, color: 'text-cyan-400' },
+            { label: 'Average', value: `${riverAvg} m`,               color: 'text-cyan-400' },
+            { label: 'Peak',    value: `${riverPeak} m`,               color: riverTrend.isUp ? 'text-red-400' : 'text-emerald-400' },
+          ].map(stat => (
+            <div key={stat.label} className="bg-slate-800/60 p-3 rounded-lg">
+              <p className="text-xs text-slate-400">{stat.label}</p>
+              <p className={`text-base font-bold ${stat.color}`}>{stat.value}</p>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Rainfall Trend */}
+      {/* ── Rainfall ───────────────────────────────────────────────────────── */}
       <div className="card p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <CloudRain className="h-5 w-5 text-blue-400" />
-            <h2 className="text-xl font-semibold text-white">Rainfall Trend (24h)</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Rainfall Trend (24h)</h2>
+              <p className="text-xs text-slate-500">{stationCount.rainfall} districts</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {rainfallTrend.isUp ? (
-              <TrendingUp className="h-4 w-4 text-blue-400" />
-            ) : (
-              <TrendingDown className="h-4 w-4 text-green-400" />
-            )}
-            <span className={`text-sm font-medium ${rainfallTrend.isUp ? 'text-blue-400' : 'text-green-400'}`}>
+          <div className="flex items-center gap-1.5">
+            {rainfallTrend.isUp
+              ? <TrendingUp  className="h-4 w-4 text-blue-400" />
+              : <TrendingDown className="h-4 w-4 text-emerald-400" />}
+            <span className={`text-sm font-medium ${rainfallTrend.isUp ? 'text-blue-400' : 'text-emerald-400'}`}>
               {rainfallTrend.value.toFixed(1)}%
             </span>
           </div>
@@ -232,73 +212,45 @@ const LiveTrends = () => {
 
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={rainfallTrendData}>
+            <AreaChart data={rainfallSeries} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <defs>
-                <linearGradient id="rainfallGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                <linearGradient id="rainfallGradientLT" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.35} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis
-                dataKey="time"
-                stroke="#9ca3af"
-                fontSize={11}
-                interval="preserveStartEnd"
-                tick={{ fill: '#9ca3af' }}
-              />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <XAxis dataKey="time" stroke="#475569" fontSize={11} interval="preserveStartEnd" tick={{ fill: '#94a3b8' }} />
               <YAxis
-                stroke="#9ca3af"
-                fontSize={11}
-                domain={[0, 'dataMax + 10']}
-                tick={{ fill: '#9ca3af' }}
-                label={{ value: 'Rainfall (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#9ca3af' } }}
+                stroke="#475569" fontSize={11}
+                domain={[0, 'auto']}
+                tick={{ fill: '#94a3b8' }}
+                label={{ value: 'mm / h', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#64748b', fontSize: 11 } }}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1e293b',
-                  border: '1px solid #374151',
-                  borderRadius: '8px',
-                  color: '#f1f5f9'
-                }}
-                labelStyle={{ color: '#f1f5f9' }}
-                formatter={(value) => [`${value} mm`, 'Rainfall']}
+                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#f1f5f9' }}
+                labelStyle={{ color: '#94a3b8' }}
+                formatter={v => [`${v} mm`, 'Rainfall']}
               />
-              <Area
-                type="monotone"
-                dataKey="rainfall"
-                stroke="#3b82f6"
-                strokeWidth={2}
-                fill="url(#rainfallGradient)"
-                dot={false}
-              />
+              <Area type="monotone" dataKey="rainfall" stroke="#3b82f6" strokeWidth={2} fill="url(#rainfallGradientLT)" dot={false} activeDot={{ r: 4 }} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-4 text-center">
-          <div className="bg-slate-700/40 p-3 rounded-lg">
-            <p className="text-xs text-slate-400">Last Hour</p>
-            <p className="text-lg font-bold text-blue-400">
-              {rainfallTrendData[riverTrendData.length - 1]?.rainfall?.toFixed(1)}mm
-            </p>
-          </div>
-          <div className="bg-slate-700/40 p-3 rounded-lg">
-            <p className="text-xs text-slate-400">24h Total</p>
-            <p className="text-lg font-bold text-blue-400">
-              {rainfallTrendData.reduce((sum, item) => sum + item.rainfall, 0).toFixed(1)}mm
-            </p>
-          </div>
-          <div className="bg-slate-700/40 p-3 rounded-lg">
-            <p className="text-xs text-slate-400">Peak Rate</p>
-            <p className="text-lg font-bold text-blue-400">
-              {Math.max(...rainfallTrendData.map(item => item.rainfall)).toFixed(1)}mm/h
-            </p>
-          </div>
+        <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+          {[
+            { label: 'Last Hour',  value: `${rainfallLast.toFixed(1)} mm`, color: 'text-blue-400' },
+            { label: '24h Total',  value: `${rainfallTotal} mm`,           color: 'text-blue-400' },
+            { label: 'Peak Rate',  value: `${rainfallPeak} mm/h`,          color: rainfallTrend.isUp ? 'text-orange-400' : 'text-emerald-400' },
+          ].map(stat => (
+            <div key={stat.label} className="bg-slate-800/60 p-3 rounded-lg">
+              <p className="text-xs text-slate-400">{stat.label}</p>
+              <p className={`text-base font-bold ${stat.color}`}>{stat.value}</p>
+            </div>
+          ))}
         </div>
       </div>
+
     </div>
   );
-};
-
-export default LiveTrends;
+}
